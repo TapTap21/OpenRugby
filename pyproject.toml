@@ -1,4 +1,12 @@
 # Tooling config for tools/ (Python extractors). No package code is defined here.
+[project]
+name = "openrugby-tools"
+version = "0.0.0"
+requires-python = ">=3.12"
+
+[project.optional-dependencies]
+tools = ["pillow>=10"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py312"
