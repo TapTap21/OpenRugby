@@ -4,9 +4,6 @@ on:
   push:
     tags: ["v*"]
 
-env:
-  GODOT_VERSION: "4.7.2"
-
 permissions:
   contents: write
 
@@ -30,6 +27,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           lfs: true
+      - name: Read pinned engine version (.godot-version)
+        shell: bash
+        run: echo "GODOT_VERSION=$(sed -E 's/\.stable$//' .godot-version | tr -d '[:space:]')" >> "$GITHUB_ENV"
       - uses: chickensoft-game/setup-godot@v2
         with:
           version: ${{ env.GODOT_VERSION }}

@@ -6,4 +6,4 @@ extends Node
 
 
 func _ready() -> void:
-	_title.text = tr("OpenRugby")
+	_title.text = tr("GAME_TITLE")

@@ -11,6 +11,10 @@ TARGET="${1:-res://tests}"
 # Make sure class_name cache and imports exist (fresh CI checkouts have no .godot/).
 "$GODOT_BIN" --headless --path . --import >/dev/null 2>&1 || true
 
-# gdUnit4 exits 100 on test failures, 101 on warnings-only; treat only 0 as success.
-"$GODOT_BIN" --headless --path . -s -d res://addons/gdUnit4/bin/GdUnitCmdTool.gd \
-	--ignoreHeadlessMode -a "$TARGET" -c </dev/null
+# gdUnit4 exits 100 on test failures, 101 on warnings-only, 105 on script/parse errors;
+# treat only 0 as success.
+# --remote-debug to an unbound port keeps Godot out of its local CLI debugger: with plain -d a
+# parse error drops into 'debug>' and, with stdin closed, the process exits 0 (a silent pass).
+# This mirrors addons/gdUnit4/runtest.sh. stdin stays closed as a second guard against hangs.
+"$GODOT_BIN" --headless --path . -s -d --remote-debug tcp://127.0.0.1:0 \
+	res://addons/gdUnit4/bin/GdUnitCmdTool.gd --ignoreHeadlessMode -a "$TARGET" -c </dev/null

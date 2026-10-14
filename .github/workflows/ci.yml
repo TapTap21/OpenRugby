@@ -9,9 +9,6 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  GODOT_VERSION: "4.7.2"
-
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -21,7 +18,7 @@ jobs:
           lfs: true
       - uses: astral-sh/setup-uv@v6
       - name: Install gdtoolkit and ruff
-        run: uv tool install "gdtoolkit==4.*" && uv tool install ruff
+        run: uv tool install "gdtoolkit==4.*" && uv tool install ruff==0.17.0
       - name: Hygiene
         run: scripts/hygiene.sh
       - name: gdlint
@@ -30,6 +27,8 @@ jobs:
         run: gdformat --check --line-length 100 game autoload tests
       - name: ruff
         run: ruff check tools && ruff format --check tools
+      - name: pytest (tools)
+        run: uvx --with pillow pytest -q
 
   test:
     runs-on: ubuntu-latest
@@ -37,6 +36,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           lfs: true
+      - name: Read pinned engine version (.godot-version)
+        shell: bash
+        run: echo "GODOT_VERSION=$(sed -E 's/\.stable$//' .godot-version | tr -d '[:space:]')" >> "$GITHUB_ENV"
       - uses: chickensoft-game/setup-godot@v2
         with:
           version: ${{ env.GODOT_VERSION }}
@@ -72,6 +74,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           lfs: true
+      - name: Read pinned engine version (.godot-version)
+        shell: bash
+        run: echo "GODOT_VERSION=$(sed -E 's/\.stable$//' .godot-version | tr -d '[:space:]')" >> "$GITHUB_ENV"
       - uses: chickensoft-game/setup-godot@v2
         with:
           version: ${{ env.GODOT_VERSION }}

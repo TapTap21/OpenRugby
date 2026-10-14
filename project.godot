@@ -24,7 +24,6 @@ GameSettings="*res://autoload/game_settings.gd"
 
 gdscript/warnings/exclude_addons=true
 gdscript/warnings/untyped_declaration=2
-gdscript/warnings/inferred_declaration=2
 gdscript/warnings/unsafe_property_access=2
 gdscript/warnings/unsafe_method_access=2
 gdscript/warnings/unsafe_cast=2
@@ -34,6 +33,10 @@ gdscript/warnings/return_value_discarded=2
 
 [display]
 
+window/size/viewport_width=1920
+window/size/viewport_height=1080
+window/size/window_width_override=1280
+window/size/window_height_override=720
 window/stretch/mode="canvas_items"
 window/stretch/aspect="expand"
 
@@ -41,9 +44,18 @@ window/stretch/aspect="expand"
 
 enabled=PackedStringArray("res://addons/gdUnit4/plugin.cfg")
 
+[gui]
+
+theme/custom="res://assets/themes/default_theme.tres"
+
+[internationalization]
+
+locale/translations=PackedStringArray("res://localization/translations.en.translation")
+
 [physics]
 
 common/physics_ticks_per_second=60
+common/physics_interpolation=true
 3d/physics_engine="Jolt Physics"
 
 [rendering]

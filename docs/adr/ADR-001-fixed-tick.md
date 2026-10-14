@@ -17,7 +17,9 @@ that impossible. The original game also ran a fixed-step simulation.
   sim state; it never mutates it.
 - The sim uses a seeded `RandomNumberGenerator` owned by the match, never global RNG or wall-clock
   time. Inputs are sampled once per tick into an input log.
-- Frame rate stays uncapped; rendering interpolates between ticks.
+- Frame rate stays uncapped; rendering interpolates between ticks via Godot physics
+  interpolation (`physics/common/physics_interpolation=true`), so presentation is smooth at any
+  refresh rate without running the sim faster.
 
 ## Consequences
 

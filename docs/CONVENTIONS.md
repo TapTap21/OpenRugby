@@ -8,8 +8,10 @@ slice for violations. Source: `docs/PLAN.md` section 1b.
 
 - [ ] `gdformat` formatting, `gdlint` clean, tabs for indentation, 100-column lines.
 - [ ] Static typing everywhere: typed vars, typed params, explicit return types. Project settings
-      turn `untyped_declaration`, `inferred_declaration`, `unsafe_*` and `return_value_discarded`
+      turn `untyped_declaration`, `unsafe_*` and `return_value_discarded`
       warnings into errors.
+      `:=` inference is allowed when the type is obvious (Godot style guide); an untyped
+      `var x = ...` is an error.
 - [ ] Naming: `snake_case` for files, folders, functions, variables and signals; `PascalCase` for
       `class_name` and node names; `CONSTANT_CASE` for constants; leading underscore for private
       members; signals in past tense.
