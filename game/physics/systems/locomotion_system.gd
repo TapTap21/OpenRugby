@@ -9,10 +9,18 @@ var players: Array[PlayerMotionState] = []
 var pitch_condition: int = -1
 var fatigue_option: int = -1
 var unresolved_inputs: PackedStringArray = []
+var runtime_port: S2RuntimePort
+var _initial_inputs_available: bool = true
+var _updated_player_ids: Dictionary[StringName, bool] = {}
 
 
 func _init(p_params: LocomotionParams = null) -> void:
 	params = p_params
+
+
+## Orders injected players by stable team/shirt/player identity before tick one.
+func setup(_sim: MatchSim) -> void:
+	players.sort_custom(_player_less)
 
 
 func system_id() -> StringName:
@@ -22,6 +30,9 @@ func system_id() -> StringName:
 ## Updates players in stable team/shirt/player-id order, only with valid injected snapshots.
 func tick(sim: MatchSim) -> void:
 	unresolved_inputs.clear()
+	_process_player_commands()
+	if runtime_port != null and not runtime_port.tick_succeeded():
+		return
 	if not sim.is_simulation_active():
 		return
 	if params == null or not params.validate().is_empty():
@@ -30,6 +41,16 @@ func tick(sim: MatchSim) -> void:
 	if pitch_condition < 0 or pitch_condition > 5 or fatigue_option < 0 or fatigue_option > 100:
 		unresolved_inputs += PackedStringArray(["pitch condition or fatigue option is unresolved"])
 		return
+	if not _initial_inputs_available:
+		for player: PlayerMotionState in players:
+			if not _updated_player_ids.has(player.player_id):
+				var detail: String = (
+					"missing per-tick fatigue/movement input for %s" % player.player_id
+				)
+				unresolved_inputs.append(detail)
+				if runtime_port != null:
+					runtime_port.fail_tick(detail)
+				return
 	var fatigue_multiplier: float = params.fatigue_multiplier(fatigue_option)
 	players.sort_custom(_player_less)
 	var seen_player_ids: Dictionary[StringName, bool] = {}
@@ -105,6 +126,41 @@ func tick(sim: MatchSim) -> void:
 			player.fatigue_snapshot.energy_cap
 		)
 		player.stagger_timer_s = maxf(0.0, player.stagger_timer_s - MATCH_DT)
+	_initial_inputs_available = false
+
+
+## Captures all mutable locomotion state for an S2 tick transaction.
+func transaction_checkpoint() -> SimDependencyCheckpoint:
+	var checkpoint: SimDependencyCheckpoint = SimDependencyCheckpoint.new()
+	checkpoint.complete = true
+	var player_copies: Array[PlayerMotionState] = []
+	for player: PlayerMotionState in players:
+		player_copies.append(player.duplicate_state())
+	checkpoint.state = {
+		"players": player_copies,
+		"pitch_condition": pitch_condition,
+		"fatigue_option": fatigue_option,
+		"unresolved_inputs": unresolved_inputs.duplicate(),
+		"initial_inputs_available": _initial_inputs_available,
+		"updated_player_ids": _updated_player_ids.duplicate(),
+	}
+	return checkpoint
+
+
+## Restores all mutable locomotion state from an S2 tick transaction.
+func restore_transaction_checkpoint(checkpoint: SimDependencyCheckpoint) -> bool:
+	if checkpoint == null or not checkpoint.complete:
+		return false
+	var saved: Dictionary = checkpoint.state
+	players.clear()
+	for player: PlayerMotionState in saved["players"]:
+		players.append(player.duplicate_state())
+	pitch_condition = saved["pitch_condition"]
+	fatigue_option = saved["fatigue_option"]
+	unresolved_inputs = saved["unresolved_inputs"].duplicate()
+	_initial_inputs_available = saved["initial_inputs_available"]
+	_updated_player_ids = saved["updated_player_ids"].duplicate()
+	return true
 
 
 func snapshot() -> Dictionary:
@@ -117,7 +173,14 @@ func snapshot() -> Dictionary:
 		"fatigue_option": fatigue_option,
 		"players": player_data,
 		"unresolved_inputs": Array(unresolved_inputs),
+		"initial_inputs_available": _initial_inputs_available,
+		"updated_player_ids": _updated_ids_snapshot(),
 	}
+
+
+## Declares that [method snapshot] includes all future-affecting locomotion state.
+func snapshot_is_complete() -> bool:
+	return true
 
 
 ## Returns whether an energy level may begin or continue sprinting.
@@ -137,6 +200,71 @@ func _player_less(left: PlayerMotionState, right: PlayerMotionState) -> bool:
 	if left.shirt_number != right.shirt_number:
 		return left.shirt_number < right.shirt_number
 	return String(left.player_id) < String(right.player_id)
+
+
+func _updated_ids_snapshot() -> Array[StringName]:
+	var ids: Array[StringName] = []
+	for player_id: StringName in _updated_player_ids:
+		ids.append(player_id)
+	ids.sort_custom(_string_name_less)
+	return ids
+
+
+func _string_name_less(left: StringName, right: StringName) -> bool:
+	return String(left) < String(right)
+
+
+func _process_player_commands() -> void:
+	if runtime_port == null:
+		return
+	_updated_player_ids.clear()
+	for command: S2RuntimeCommand in runtime_port.commands_for_phase(
+		S2RuntimeCommand.Phase.LOCOMOTION
+	):
+		var result: S2RuntimeResult = S2RuntimeResult.new()
+		if command.validate().is_empty() and _apply_player_input(command.player_input):
+			result.status = S2RuntimeResult.Status.SUCCEEDED
+		else:
+			result.status = S2RuntimeResult.Status.REJECTED
+			result.detail = "player tick input did not match a composed player"
+		runtime_port.complete_command(command, result)
+		if not runtime_port.tick_succeeded():
+			return
+
+
+func _apply_player_input(input: S2PlayerTickInput) -> bool:
+	if input == null or not input.is_valid():
+		return false
+	for index: int in players.size():
+		var player: PlayerMotionState = players[index]
+		if player.player_id != input.player_id:
+			continue
+		if (
+			player.team_id != input.fatigue_snapshot.team_id
+			or player.shirt_number != input.fatigue_snapshot.shirt_number
+		):
+			return false
+		var updated: PlayerMotionState = player.duplicate_state()
+		updated.sprint_request = input.sprint_request
+		updated.urgency = input.urgency
+		updated.fatigue_snapshot = _copy_fatigue(input.fatigue_snapshot)
+		players[index] = updated
+		_updated_player_ids[input.player_id] = true
+		return true
+	return false
+
+
+func _copy_fatigue(source: PlayerFatigueSnapshot) -> PlayerFatigueSnapshot:
+	var copy: PlayerFatigueSnapshot = PlayerFatigueSnapshot.new()
+	copy.team_id = source.team_id
+	copy.shirt_number = source.shirt_number
+	copy.fatigue_time_s = source.fatigue_time_s
+	copy.energy_cap = source.energy_cap
+	copy.energy_percent = source.energy_percent
+	copy.effective_passing = source.effective_passing
+	copy.effective_tackling = source.effective_tackling
+	copy.initial_sprint_energy = source.initial_sprint_energy
+	return copy
 
 
 func _property_name(property: Dictionary) -> String:

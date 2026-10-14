@@ -48,9 +48,42 @@
 ## Verification status
 
 - `gdlint .`: PASS — `Success: no problems found`.
-- `gdformat --check --line-length 100` on the eight changed GDScript files: PASS — `8 files would be left unchanged`.
+- Targeted `gdformat --check --line-length 100` on 30 changed GDScript files: PASS — `30 files would be left unchanged`.
 - `scripts/hygiene.sh`: PASS — `hygiene: ok`.
-- `git diff --check`: PASS — exit 0, no output.
-- Repository-wide `gdformat --check --line-length 100 .`: FAIL on existing vendored `addons/gdUnit4` files (210 requested reformats) and parser error in `addons/gdUnit4/src/doubler/GdUnitClassDoubler.gd`. No vendored files were changed.
-- No tests or Godot commands were run, as required for this fix round.
-- Root `.omc/HANDOFF.md` and `.omc/research/PHASE1_BRIEF.md` were absent in this worktree; tracked project rules and RE specs were used.
+- `git diff --check`: PASS — exit 0, no output. New files also passed `git diff --no-index --check /dev/null <file>` with no output.
+- Git staging was unavailable: `git add -A` could not create `.git/worktrees/s2-implementation/index.lock` because the filesystem is read-only; an orchestrator with writable Git metadata must commit this slice.
+- No tests or Godot commands were run. Independent test API reconciliation is still incomplete.
+- No Godot invocation was made, so no safety-gate/invocation pair applies.
+
+## Runtime composition and replay update
+
+- `MatchCompositionBuilder.build()` is the shared entry point for `MatchRunner.start()` and
+  `MatchReplay.run()`. It applies the same extension setup and system order: caller systems,
+  extension systems, `s2_locomotion`, `s2_ball_physics`, then `s2_interactions`.
+- `MatchBuildResult` carries a typed `MatchReadinessReport`. Missing match setup, stadium geometry,
+  contact solver, wind policy, ball initialization, player/fatigue inputs, replay-safe hooks, or
+  restorable systems/dependencies remain start blockers. `MatchRunner` and `Main` expose the report.
+- Callers inject setup and enqueue `S2RuntimeCommand` values through `S2RuntimePort`; outputs are
+  `S2RuntimeResult` values tied to command sequence numbers. The port has no scene or `Node` API.
+  S2 accepts already-resolved owner values and does not infer action mappings, pass paths, catch
+  selection, fatigue, weather policy, or goal-kick rules.
+- A caller must initialize ball body pose, `BallMode`, and `GoalKickState` before the first tick.
+  Ordinary play is explicitly supplied as `GoalKickState.OFF`; an active goal kick needs an explicit
+  wind policy. No default state is applied to unblock launch.
+- Replay format v2 stores per-frame command inputs and typed outputs and adds a setup fingerprint
+  to `ReplayHeader`. The fingerprint covers effective config/resources, caller and extension system
+  setup, ordered extension configuration, action-layout and mod hashes, ball/player/environment
+  setup, contact providers, resolved wind policy, and tick rate. Replay rejects older headers and
+  mismatched fingerprints.
+- Tick execution checkpoints every injected system, contact source and contact solver, ball and
+  player state, `SimRng`, queued commands, prior outputs and sequence state. A rejected command or
+  failed later solver substep restores the complete pre-tick state. Injected dependencies must
+  explicitly declare statelessness or implement complete snapshot/checkpoint/restore contracts.
+- This is runtime composition plumbing, not a complete runnable Classic match. The Classic stadium
+  geometry provider and contract-complete normal/friction/rolling LCP solver remain unavailable.
+  Player/fatigue/action-owner inputs also must be supplied, and no fallback contact or damping path
+  is provided. Tests remain unrun until independent test API reconciliation is complete.
+
+These checks do not establish merge readiness. The geometry provider, contract-complete LCP solver,
+and caller-owned action/player inputs remain unavailable, and tests are still gated on independent
+test API reconciliation.

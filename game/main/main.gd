@@ -2,6 +2,10 @@ class_name Main
 extends Node
 ## Entry scene of OpenRugby. Will become the scene router; for now it only shows a title label.
 
+signal match_start_blocked(report: MatchReadinessReport)
+
+var last_match_build: MatchBuildResult
+
 var _mod_loader: ModLoader
 var _mod_runtime: ModRuntime
 var _match_runner: MatchRunner
@@ -16,12 +20,45 @@ func _ready() -> void:
 
 
 ## Starts a match through a runner using this Main instance's applied mod runtime.
-func start_match(config: MatchConfig, source: InputSource, systems: Array[SimSystem] = []) -> Error:
+func start_match(
+	config: MatchConfig,
+	source: InputSource,
+	systems: Array[SimSystem] = [],
+	s2_port: S2RuntimePort = null
+) -> Error:
 	if _mod_runtime == null:
+		last_match_build = MatchBuildResult.new()
+		last_match_build.readiness.add_blocker(
+			MatchReadinessReport.Capability.MATCH_CONFIG, "mod runtime is not initialized"
+		)
+		match_start_blocked.emit(last_match_build.readiness)
 		return ERR_UNCONFIGURED
 	if _match_runner == null:
 		_match_runner = MatchRunner.new()
 		add_child(_match_runner)
-	return _match_runner.start(
-		config, source, systems, _mod_runtime.mod_set_hash, _mod_runtime.extension_points
+	var error: Error = _match_runner.start(
+		config,
+		source,
+		systems,
+		_mod_runtime.mod_set_hash,
+		_mod_runtime.extension_points,
+		null,
+		null,
+		s2_port
 	)
+	last_match_build = _match_runner.last_build_result
+	if error != OK and last_match_build != null:
+		match_start_blocked.emit(last_match_build.readiness)
+	return error
+
+
+## Typed readiness report for the most recent match start attempt.
+func match_readiness_report() -> MatchReadinessReport:
+	if last_match_build == null:
+		return MatchReadinessReport.new()
+	return last_match_build.readiness
+
+
+## Caller-owned S2 setup/action port, available even when start reports blockers.
+func s2_runtime_port() -> S2RuntimePort:
+	return _match_runner.runtime_port if _match_runner != null else null

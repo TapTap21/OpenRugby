@@ -5,13 +5,17 @@ extends RefCounted
 const _INT_KEYS: PackedStringArray = [
 	"format_version", "seed", "tick_rate", "slot_count", "axes_per_slot"
 ]
-const _STRING_KEYS: PackedStringArray = ["game_version", "mod_set_hash", "action_layout_hash"]
+const CURRENT_FORMAT_VERSION: int = 2
+const _STRING_KEYS: PackedStringArray = [
+	"game_version", "mod_set_hash", "action_layout_hash", "setup_fingerprint"
+]
 
-var format_version: int = 1
+var format_version: int = CURRENT_FORMAT_VERSION
 var game_version: String = ""
 var seed: int = 0
 var mod_set_hash: String = ""
 var action_layout_hash: String = ""
+var setup_fingerprint: String = ""
 var tick_rate: int = 60
 var slot_count: int = 1
 var axes_per_slot: int = 2
@@ -23,14 +27,19 @@ static func from_dict(d: Dictionary) -> ReplayHeader:
 		if not d.has(key) or typeof(d[key]) != TYPE_INT:
 			return null
 	for key: String in _STRING_KEYS:
+		if key == "setup_fingerprint" and d.get("format_version", 1) < 2:
+			continue
 		if not d.has(key) or typeof(d[key]) != TYPE_STRING:
 			return null
+	if d["format_version"] < 1 or d["format_version"] > CURRENT_FORMAT_VERSION:
+		return null
 	var header: ReplayHeader = ReplayHeader.new()
 	header.format_version = d["format_version"]
 	header.game_version = d["game_version"]
 	header.seed = d["seed"]
 	header.mod_set_hash = d["mod_set_hash"]
 	header.action_layout_hash = d["action_layout_hash"]
+	header.setup_fingerprint = d.get("setup_fingerprint", "")
 	header.tick_rate = d["tick_rate"]
 	header.slot_count = d["slot_count"]
 	header.axes_per_slot = d["axes_per_slot"]
@@ -45,6 +54,7 @@ func to_dict() -> Dictionary:
 		"seed": seed,
 		"mod_set_hash": mod_set_hash,
 		"action_layout_hash": action_layout_hash,
+		"setup_fingerprint": setup_fingerprint,
 		"tick_rate": tick_rate,
 		"slot_count": slot_count,
 		"axes_per_slot": axes_per_slot,
@@ -52,9 +62,13 @@ func to_dict() -> Dictionary:
 
 
 ## True when both hashes match and the tick rate equals the simulation tick rate.
-func is_compatible_with(p_mod_set_hash: String, p_action_layout_hash: String) -> bool:
+func is_compatible_with(
+	p_mod_set_hash: String, p_action_layout_hash: String, p_setup_fingerprint: String
+) -> bool:
 	return (
-		mod_set_hash == p_mod_set_hash
+		format_version == CURRENT_FORMAT_VERSION
+		and mod_set_hash == p_mod_set_hash
 		and action_layout_hash == p_action_layout_hash
+		and setup_fingerprint == p_setup_fingerprint
 		and tick_rate == MatchSim.TICKS_PER_SECOND
 	)

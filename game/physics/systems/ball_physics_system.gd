@@ -7,6 +7,8 @@ const TICK_NUMERATOR: int = 200
 
 var params: BallPhysicsParams
 var surfaces: PitchSurfaceTable
+var kick_params: KickParams
+var pass_params: PassParams
 var contact_source: BallContactSource
 var contact_solver: BallContactSolver
 var pitch_condition: int = -1
@@ -15,6 +17,7 @@ var extension_points: ExtensionPoints
 var wind_policy_resolved: bool = false
 var wind_enabled: bool = false
 var wind_km_h: Vector3 = Vector3.ZERO
+var wind_policy_from_extensions: S2WindPolicy
 var state: BallState = BallState.new()
 ## Injected contacts are consumed in deterministic sorted order at the next solver step.
 var pending_contacts: Array[BallContact] = []
@@ -23,6 +26,8 @@ var match_active: bool = false
 var last_substeps: int = 0
 var last_post_part: int = 0
 var mod_issues: PackedStringArray = []
+var runtime_port: S2RuntimePort
+var _contact_data_valid: bool = true
 
 
 func _init(
@@ -61,6 +66,33 @@ func initialize_new_body(position_m: Vector3, orientation: Quaternion, rng: SimR
 	return true
 
 
+## Initializes all ball state from explicit owner values before the first tick.
+func initialize_from(initialization: S2BallInitialization) -> bool:
+	if initialization == null or not initialization.validate().is_empty():
+		return false
+	var resolved_wind: S2WindPolicy = initialization.wind_policy
+	if resolved_wind == null:
+		resolved_wind = wind_policy_from_extensions
+	if (
+		initialization.goal_kick_state == BallState.GoalKickState.ACTIVE
+		and (resolved_wind == null or not resolved_wind.is_valid())
+	):
+		return false
+	state.position_m = initialization.position_m
+	state.orientation = initialization.orientation.normalized()
+	state.linear_velocity_m_s = initialization.linear_velocity_m_s
+	state.angular_velocity_rad_s = initialization.angular_velocity_rad_s
+	state.mode = initialization.mode
+	state.goal_kick_state = initialization.goal_kick_state
+	state.solver_accumulator = 0
+	if resolved_wind != null:
+		return set_wind_policy(resolved_wind.enabled, resolved_wind.vector_km_h)
+	wind_policy_resolved = false
+	wind_enabled = false
+	wind_km_h = Vector3.ZERO
+	return true
+
+
 ## Stable system identifier included in MatchSim snapshots.
 func system_id() -> StringName:
 	return &"s2_ball_physics"
@@ -70,6 +102,9 @@ func system_id() -> StringName:
 func tick(sim: MatchSim) -> void:
 	last_substeps = 0
 	match_active = sim.is_simulation_active()
+	_process_ball_commands(sim)
+	if runtime_port != null and not runtime_port.tick_succeeded():
+		return
 	if params == null or not params.validate().is_empty():
 		mod_issues += PackedStringArray(["ball physics parameters are missing or invalid"])
 		return
@@ -101,6 +136,8 @@ func tick(sim: MatchSim) -> void:
 			state.solver_accumulator = accumulator_before_tick
 			last_post_part = post_part_before_tick
 			last_substeps = 0
+			if runtime_port != null:
+				runtime_port.fail_tick("ball solver substep failed transactionally")
 			return
 		last_substeps += 1
 
@@ -126,27 +163,77 @@ func snapshot() -> Dictionary:
 	}
 
 
-## Injects extension points and resolves the first non-null match wind provider once.
-func configure_extensions(points: ExtensionPoints, config: MatchConfig) -> void:
+func snapshot_is_complete() -> bool:
+	return (
+		contact_source != null
+		and contact_solver != null
+		and contact_source.snapshot_is_complete()
+		and contact_solver.snapshot_is_complete()
+	)
+
+
+## Captures ball and injected provider state for whole-tick rollback.
+func transaction_checkpoint() -> SimDependencyCheckpoint:
+	if contact_source == null or contact_solver == null:
+		return null
+	var source_checkpoint: SimDependencyCheckpoint = contact_source.transaction_checkpoint()
+	var solver_checkpoint: SimDependencyCheckpoint = contact_solver.transaction_checkpoint()
+	if (
+		source_checkpoint == null
+		or not source_checkpoint.complete
+		or solver_checkpoint == null
+		or not solver_checkpoint.complete
+	):
+		return null
+	var checkpoint: SimDependencyCheckpoint = SimDependencyCheckpoint.new()
+	checkpoint.complete = true
+	var contacts: Array[BallContact] = []
+	for contact: BallContact in pending_contacts:
+		contacts.append(_copy_contact(contact))
+	checkpoint.state = {
+		"ball": _copy_ball_state(state),
+		"pending_contacts": contacts,
+		"match_active": match_active,
+		"last_substeps": last_substeps,
+		"last_post_part": last_post_part,
+		"wind_policy_resolved": wind_policy_resolved,
+		"wind_enabled": wind_enabled,
+		"wind_km_h": wind_km_h,
+		"mod_issues": mod_issues.duplicate(),
+		"contact_source": source_checkpoint,
+		"contact_solver": solver_checkpoint,
+	}
+	return checkpoint
+
+
+## Restores ball and injected contact providers to a pre-tick checkpoint.
+func restore_transaction_checkpoint(checkpoint: SimDependencyCheckpoint) -> bool:
+	if checkpoint == null or not checkpoint.complete:
+		return false
+	var saved: Dictionary = checkpoint.state
+	state = _copy_ball_state(saved["ball"])
+	pending_contacts.clear()
+	for contact: BallContact in saved["pending_contacts"]:
+		pending_contacts.append(_copy_contact(contact))
+	match_active = saved["match_active"]
+	last_substeps = saved["last_substeps"]
+	last_post_part = saved["last_post_part"]
+	wind_policy_resolved = saved["wind_policy_resolved"]
+	wind_enabled = saved["wind_enabled"]
+	wind_km_h = saved["wind_km_h"]
+	mod_issues = saved["mod_issues"].duplicate()
+	var source_restored: bool = contact_source.restore_transaction_checkpoint(
+		saved["contact_source"]
+	)
+	var solver_restored: bool = contact_solver.restore_transaction_checkpoint(
+		saved["contact_solver"]
+	)
+	return source_restored and solver_restored
+
+
+## Injects the already-resolved extension configuration from the composition builder.
+func configure_extensions(points: ExtensionPoints, _config: MatchConfig) -> void:
 	extension_points = points
-	if extension_points == null:
-		return
-	for provider: Callable in extension_points.hooks(BaseExtensionPoints.PHYSICS_WIND_PROVIDER):
-		var provided: Variant = provider.call(config)
-		if provided == null:
-			continue
-		if not provided is Vector3:
-			mod_issues += PackedStringArray(["physics.wind_provider returned an invalid vector"])
-			return
-		@warning_ignore("unsafe_cast")
-		var provided_wind: Vector3 = provided
-		if not provided_wind.is_finite():
-			mod_issues += PackedStringArray(["physics.wind_provider returned an invalid vector"])
-			return
-		wind_km_h = provided_wind
-		wind_enabled = true
-		wind_policy_resolved = true
-		return
 
 
 ## Allows the owning match environment to explicitly resolve wind off or inject its vector.
@@ -156,6 +243,44 @@ func set_wind_policy(enabled: bool, vector_km_h: Vector3) -> bool:
 	wind_policy_resolved = true
 	wind_enabled = enabled
 	wind_km_h = vector_km_h
+	return true
+
+
+## Sets owner-resolved wind policy without interpreting weather levels.
+func apply_wind_policy(policy: S2WindPolicy) -> bool:
+	if policy == null or not policy.is_valid():
+		return false
+	return set_wind_policy(policy.enabled, policy.vector_km_h)
+
+
+## Resolves owner-supplied ball mode and goal-kick state after validating all values.
+func resolve_ball_state(
+	mode: BallState.Mode, goal_kick_state: BallState.GoalKickState, policy: S2WindPolicy
+) -> bool:
+	if (
+		mode == BallState.Mode.UNRESOLVED
+		or mode < BallState.Mode.HELD
+		or mode > BallState.Mode.ROLLING
+		or goal_kick_state == BallState.GoalKickState.UNRESOLVED
+		or goal_kick_state < BallState.GoalKickState.OFF
+		or goal_kick_state > BallState.GoalKickState.ACTIVE
+		or (
+			goal_kick_state == BallState.GoalKickState.ACTIVE
+			and (policy == null or not policy.is_valid())
+		)
+	):
+		return false
+	if policy != null and not policy.is_valid():
+		return false
+	if policy != null:
+		if not set_wind_policy(policy.enabled, policy.vector_km_h):
+			return false
+	else:
+		wind_policy_resolved = false
+		wind_enabled = false
+		wind_km_h = Vector3.ZERO
+	state.mode = mode
+	state.goal_kick_state = goal_kick_state
 	return true
 
 
@@ -170,11 +295,117 @@ func commit_kick(launch: KickLaunch) -> bool:
 
 
 func commit_pass(launch: PassLaunch) -> bool:
-	if launch == null or launch.unresolved or not _valid_vector(launch.velocity_m_s):
+	if (
+		launch == null
+		or launch.unresolved
+		or not _valid_vector(launch.velocity_m_s)
+		or not launch.target_m.is_finite()
+		or not is_finite(launch.flight_time_s)
+		or launch.flight_time_s <= 0.0
+	):
 		return false
 	state.linear_velocity_m_s = launch.velocity_m_s
 	state.mode = BallState.Mode.FREE_FLIGHT
 	return true
+
+
+## Resolves a caller-built pass path, then applies assist and hook output before state commit.
+func resolve_pass_launch(
+	launch: PassLaunch, assist_setting: int, attack_direction: float, rng: SimRng
+) -> PassLaunch:
+	if (
+		launch == null
+		or launch.unresolved
+		or not launch.velocity_m_s.is_finite()
+		or not launch.target_m.is_finite()
+		or not is_finite(launch.flight_time_s)
+		or assist_setting < 0
+		or not is_finite(attack_direction)
+		or pass_params == null
+		or rng == null
+	):
+		return null
+	var resolved: PassLaunch = _copy_pass_launch(launch)
+	if assist_setting > 0:
+		resolved.velocity_m_s = PassBuilder.apply_forward_assist(
+			resolved.velocity_m_s, assist_setting, attack_direction, rng, pass_params
+		)
+	if not resolved.velocity_m_s.is_finite():
+		return null
+	return filter_pass_launch(resolved)
+
+
+func _process_ball_commands(sim: MatchSim) -> void:
+	if runtime_port == null:
+		return
+	for command: S2RuntimeCommand in runtime_port.commands_for_phase(S2RuntimeCommand.Phase.BALL):
+		var result: S2RuntimeResult = S2RuntimeResult.new()
+		var errors: PackedStringArray = command.validate()
+		if not errors.is_empty():
+			result.status = S2RuntimeResult.Status.REJECTED
+			result.detail = "; ".join(errors)
+			runtime_port.complete_command(command, result)
+			return
+		match command.kind:
+			S2RuntimeCommand.Kind.BALL_STATE:
+				if not resolve_ball_state(
+					command.ball_mode, command.goal_kick_state, command.wind_policy
+				):
+					result.status = S2RuntimeResult.Status.REJECTED
+					result.detail = "ball state command could not be resolved"
+				else:
+					result.status = S2RuntimeResult.Status.SUCCEEDED
+			S2RuntimeCommand.Kind.KICK:
+				var meter: PlaceKickMeterResult = null
+				if command.has_place_meter:
+					meter = PlaceKickMeterResult.new()
+					meter.raw_gauge = command.place_meter_gauge
+					meter.needle_error = command.place_meter_error
+				var kick_launch_value: KickLaunch = launch_kick(
+					command.kick_type,
+					command.gauge,
+					command.kicking_power,
+					command.kick_accuracy,
+					command.heading_radians,
+					sim.rng,
+					kick_params,
+					command.difficulty,
+					command.ai_place,
+					meter
+				)
+				result.kick_launch = kick_launch_value
+				if (
+					kick_launch_value == null
+					or kick_launch_value.unresolved
+					or not commit_kick(kick_launch_value)
+				):
+					result.status = S2RuntimeResult.Status.REJECTED
+					result.detail = "kick launch was unresolved or invalid"
+				else:
+					result.status = S2RuntimeResult.Status.SUCCEEDED
+			S2RuntimeCommand.Kind.PASS:
+				var pass_launch_value: PassLaunch = resolve_pass_launch(
+					command.pass_launch,
+					command.forward_assist_setting,
+					command.attack_direction,
+					sim.rng
+				)
+				result.pass_launch = pass_launch_value
+				if (
+					pass_launch_value == null
+					or pass_launch_value.unresolved
+					or not commit_pass(pass_launch_value)
+				):
+					result.status = S2RuntimeResult.Status.REJECTED
+					result.detail = "pass launch was unresolved or invalid"
+				else:
+					result.status = S2RuntimeResult.Status.SUCCEEDED
+			_:
+				result.status = S2RuntimeResult.Status.REJECTED
+				result.detail = "command is not owned by the ball phase"
+		runtime_port.complete_command(command, result)
+		if not runtime_port.tick_succeeded():
+			return
 
 
 ## Holds the ball after a resolved catch or pickup.
@@ -265,11 +496,13 @@ func launch_kick(
 	)
 	if not filtered is KickLaunch:
 		mod_issues += PackedStringArray(["physics.kick_launch returned an invalid result"])
+		launch.unresolved = true
 		return launch
 	@warning_ignore("unsafe_cast")
 	var filtered_launch: KickLaunch = filtered
 	if not _valid_launch(filtered_launch) or filtered_launch.kick_type != launch.kick_type:
 		mod_issues += PackedStringArray(["physics.kick_launch returned an invalid result"])
+		launch.unresolved = true
 		return launch
 	launch.velocity_m_s = filtered_launch.velocity_m_s
 	launch.spin_rad_s = filtered_launch.spin_rad_s
@@ -284,35 +517,34 @@ func filter_pass_launch(launch: PassLaunch) -> PassLaunch:
 	)
 	if not filtered is PassLaunch:
 		mod_issues += PackedStringArray(["physics.pass_launch returned an invalid result"])
+		launch.unresolved = true
 		return launch
 	@warning_ignore("unsafe_cast")
 	var filtered_launch: PassLaunch = filtered
 	if not _valid_vector(filtered_launch.velocity_m_s):
 		mod_issues += PackedStringArray(["physics.pass_launch returned an invalid result"])
+		launch.unresolved = true
 		return launch
 	if (
 		filtered_launch.flight_time_s != launch.flight_time_s
 		or filtered_launch.target_m != launch.target_m
 	):
 		mod_issues += PackedStringArray(["physics.pass_launch changed immutable target data"])
+		launch.unresolved = true
 		return launch
 	launch.velocity_m_s = filtered_launch.velocity_m_s
 	return launch
 
 
 func _integrate_step(dt: float) -> bool:
-	if state.goal_kick_state == BallState.GoalKickState.UNRESOLVED:
-		mod_issues += PackedStringArray(
-			["ball goal-kick state is unresolved; solver step unavailable"]
-		)
-		return false
-	if state.goal_kick_state == BallState.GoalKickState.ACTIVE and not wind_policy_resolved:
-		mod_issues += PackedStringArray(
-			["goal-kick wind policy is unresolved; solver step unavailable"]
-		)
+	if not _wind_setup_is_resolved():
 		return false
 	var wind: Vector3 = wind_km_h if wind_enabled else Vector3.ZERO
-	state.linear_velocity_m_s += acceleration_m_s2(state.linear_velocity_m_s, wind) * dt
+	var acceleration: Vector3 = acceleration_m_s2(state.linear_velocity_m_s, wind)
+	if not acceleration.is_finite():
+		mod_issues += PackedStringArray(["ball acceleration is non-finite"])
+		return false
+	state.linear_velocity_m_s += acceleration * dt
 	state.position_m += state.linear_velocity_m_s * dt
 	var angular_speed: float = state.angular_velocity_rad_s.length()
 	if angular_speed > 0.0:
@@ -324,6 +556,8 @@ func _integrate_step(dt: float) -> bool:
 			. normalized()
 		)
 	var contacts: Array[BallContact] = _detect_contacts()
+	if not _contact_data_valid:
+		return false
 	contacts.sort_custom(_contact_less)
 	if contacts.size() > params.max_contacts_per_step:
 		var resize_error: Error = contacts.resize(params.max_contacts_per_step)
@@ -335,6 +569,26 @@ func _integrate_step(dt: float) -> bool:
 		if response == null:
 			return false
 		responses.append(response)
+	return _solve_contacts(contacts, responses, dt)
+
+
+func _wind_setup_is_resolved() -> bool:
+	if state.goal_kick_state == BallState.GoalKickState.UNRESOLVED:
+		mod_issues += PackedStringArray(
+			["ball goal-kick state is unresolved; solver step unavailable"]
+		)
+		return false
+	if state.goal_kick_state == BallState.GoalKickState.ACTIVE and not wind_policy_resolved:
+		mod_issues += PackedStringArray(
+			["goal-kick wind policy is unresolved; solver step unavailable"]
+		)
+		return false
+	return true
+
+
+func _solve_contacts(
+	contacts: Array[BallContact], responses: Array[ContactResult], dt: float
+) -> bool:
 	if not contacts.is_empty():
 		if contact_source == null or contact_solver == null:
 			mod_issues += PackedStringArray(
@@ -353,6 +607,7 @@ func _integrate_step(dt: float) -> bool:
 
 
 func _detect_contacts() -> Array[BallContact]:
+	_contact_data_valid = true
 	var contacts: Array[BallContact] = []
 	var up: Vector3 = Vector3.UP
 	var body_x: Vector3 = state.orientation * Vector3.RIGHT
@@ -384,6 +639,7 @@ func _detect_contacts() -> Array[BallContact]:
 func _valid_contact_data(contact: BallContact) -> bool:
 	if contact == null:
 		mod_issues += PackedStringArray(["collision geometry returned a null contact"])
+		_contact_data_valid = false
 		return false
 	if (
 		contact.body_id < 0
@@ -395,6 +651,7 @@ func _valid_contact_data(contact: BallContact) -> bool:
 		mod_issues += PackedStringArray(
 			["collision geometry lacks stable nonnegative contact identifiers"]
 		)
+		_contact_data_valid = false
 		return false
 	if (
 		not contact.point_m.is_finite()
@@ -404,6 +661,7 @@ func _valid_contact_data(contact: BallContact) -> bool:
 		or absf(contact.normal.length() - 1.0) > 0.001
 	):
 		mod_issues += PackedStringArray(["collision geometry returned invalid contact geometry"])
+		_contact_data_valid = false
 		return false
 	return true
 
@@ -456,12 +714,15 @@ func _filter_contact(contact: BallContact) -> ContactResult:
 					mod_issues += PackedStringArray(
 						["physics.ball_contact response is outside bounds"]
 					)
+					return null
 			else:
 				mod_issues += PackedStringArray(
 					["physics.ball_contact changed immutable contact identity"]
 				)
+				return null
 		else:
 			mod_issues += PackedStringArray(["physics.ball_contact returned the wrong type"])
+			return null
 	return response
 
 
@@ -582,6 +843,28 @@ func _copy_ball_state(source: BallState) -> BallState:
 	copy.mode = source.mode
 	copy.goal_kick_state = source.goal_kick_state
 	copy.solver_accumulator = source.solver_accumulator
+	return copy
+
+
+func _copy_contact(source: BallContact) -> BallContact:
+	var copy: BallContact = BallContact.new()
+	copy.body_id = source.body_id
+	copy.feature_id = source.feature_id
+	copy.contact_kind = source.contact_kind
+	copy.point_m = source.point_m
+	copy.normal = source.normal
+	copy.penetration_m = source.penetration_m
+	copy.source_subfeature_id = source.source_subfeature_id
+	copy.detection_ordinal = source.detection_ordinal
+	return copy
+
+
+func _copy_pass_launch(source: PassLaunch) -> PassLaunch:
+	var copy: PassLaunch = PassLaunch.new()
+	copy.velocity_m_s = source.velocity_m_s
+	copy.target_m = source.target_m
+	copy.flight_time_s = source.flight_time_s
+	copy.unresolved = source.unresolved
 	return copy
 
 

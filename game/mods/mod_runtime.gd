@@ -131,9 +131,16 @@ func add_entry(mod_id: StringName, entry: ModEntry) -> void:
 ## Registers a hook for [param mod_id]; an undeclared point also adds a
 ## [code]hook_undeclared_point[/code] error. Used by [ModApi].
 func register_hook(
-	mod_id: StringName, point: StringName, callable: Callable, priority: int = 0
+	mod_id: StringName,
+	point: StringName,
+	callable: Callable,
+	priority: int = 0,
+	stateless_for_match: bool = false,
+	setup_fingerprint: String = ""
 ) -> Error:
-	var result: Error = extension_points.register(point, mod_id, callable, priority)
+	var result: Error = extension_points.register(
+		point, mod_id, callable, priority, stateless_for_match, setup_fingerprint
+	)
 	if result == ERR_DOES_NOT_EXIST:
 		add_issue(
 			ModIssue.error(

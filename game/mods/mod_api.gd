@@ -25,11 +25,19 @@ func _init(p_runtime: ModRuntime, p_mod_id: StringName) -> void:
 
 ## Registers [param callable] on the extension point [param point]. An undeclared point returns
 ## [constant ERR_DOES_NOT_EXIST] and adds a [code]hook_undeclared_point[/code] error.
-func register_hook(point: StringName, callable: Callable, priority: int = 0) -> Error:
+func register_hook(
+	point: StringName,
+	callable: Callable,
+	priority: int = 0,
+	stateless_for_match: bool = false,
+	setup_fingerprint: String = ""
+) -> Error:
 	var runtime: ModRuntime = _runtime()
 	if runtime == null:
 		return ERR_UNAVAILABLE
-	return runtime.register_hook(_mod_id, point, callable, priority)
+	return runtime.register_hook(
+		_mod_id, point, callable, priority, stateless_for_match, setup_fingerprint
+	)
 
 
 ## Connects [param callable] to the [code]EventBus[/code] signal [param signal_name]; returns

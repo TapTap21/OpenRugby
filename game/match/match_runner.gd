@@ -7,9 +7,13 @@ extends Node
 signal ticked(tick: int)
 ## Emitted when the input source has no more frames.
 signal input_ended
+## Emitted when composition cannot start; the report lists the missing capabilities.
+signal start_blocked(report: MatchReadinessReport)
 
 var sim: MatchSim
 var input_log: InputLog
+var runtime_port: S2RuntimePort
+var last_build_result: MatchBuildResult
 
 var _source: InputSource
 var _frame: InputFrame
@@ -30,69 +34,48 @@ func start(
 	mod_set_hash: String = "",
 	extension_points: ExtensionPoints = null,
 	contact_source: BallContactSource = null,
-	contact_solver: BallContactSolver = null
+	contact_solver: BallContactSolver = null,
+	s2_port: S2RuntimePort = null
 ) -> Error:
-	if Engine.physics_ticks_per_second != MatchSim.TICKS_PER_SECOND:
-		return ERR_UNCONFIGURED
-	if (
-		contact_source == null
-		or contact_solver == null
-		or not contact_source.is_available()
-		or not contact_solver.is_available()
-	):
-		return ERR_UNCONFIGURED
-	var effective_config: MatchConfig = config.duplicate(true) as MatchConfig
-	if extension_points != null:
-		var filtered_flow: Variant = extension_points.filter(
-			BaseExtensionPoints.MATCH_FLOW_CONFIG, effective_config.flow, [effective_config]
+	_running = false
+	var resolved_port: S2RuntimePort = s2_port if s2_port != null else S2RuntimePort.new()
+	if contact_source != null:
+		resolved_port.set_contact_source(contact_source)
+	if contact_solver != null:
+		resolved_port.set_contact_solver(contact_solver)
+	var request: MatchCompositionRequest = MatchCompositionRequest.new()
+	request.config = config
+	request.systems = systems.duplicate()
+	request.mod_set_hash = mod_set_hash
+	request.action_layout_hash = source.layout_hash() if source != null else ""
+	request.extension_points = extension_points
+	request.s2 = resolved_port
+	last_build_result = MatchCompositionBuilder.build(request)
+	if source == null:
+		last_build_result.readiness.add_blocker(
+			MatchReadinessReport.Capability.MATCH_CONFIG, "input source is missing"
 		)
-		if not filtered_flow is MatchFlowConfig:
-			return ERR_INVALID_PARAMETER
-		effective_config.flow = filtered_flow
-	if not effective_config.validate().is_empty():
-		return ERR_INVALID_PARAMETER
-	var provided_systems: Array = []
-	var typed_provided_systems: Array[SimSystem] = []
-	if extension_points != null:
-		provided_systems = extension_points.collect(
-			BaseExtensionPoints.MATCH_SIM_SYSTEMS, [effective_config]
-		)
-	for provided_system: Variant in provided_systems:
-		if not provided_system is SimSystem:
-			return ERR_INVALID_PARAMETER
-		typed_provided_systems.append(provided_system)
-	sim = MatchSim.new(effective_config)
-	for system: SimSystem in systems:
-		sim.add_system(system)
-	for system: SimSystem in typed_provided_systems:
-		sim.add_system(system)
-	sim.add_system(LocomotionSystem.new(effective_config.s2_physics.locomotion))
-	var ball_system: BallPhysicsSystem = BallPhysicsSystem.new(
-		effective_config.s2_physics.ball,
-		effective_config.s2_physics.surfaces,
-		contact_source,
-		contact_solver
-	)
-	ball_system.pitch_condition = effective_config.s2_physics.pitch_condition
-	ball_system.stadium_id = effective_config.s2_physics.stadium_id
-	ball_system.configure_extensions(extension_points, effective_config)
-	sim.add_system(ball_system)
-	var interaction_system: S2InteractionSystem = S2InteractionSystem.new(
-		effective_config.s2_physics.tackle, effective_config.s2_physics.catches
-	)
-	interaction_system.configure_extensions(extension_points)
-	sim.add_system(interaction_system)
+		last_build_result.error = ERR_UNCONFIGURED
+	if not last_build_result.is_success():
+		sim = null
+		input_log = null
+		runtime_port = last_build_result.s2
+		start_blocked.emit(last_build_result.readiness)
+		return last_build_result.error
+	sim = last_build_result.sim
+	runtime_port = last_build_result.s2
 	var header: ReplayHeader = ReplayHeader.new()
 	var version: String = ProjectSettings.get_setting("application/config/version", "")
 	header.game_version = version
-	header.seed = effective_config.seed
+	header.seed = sim.config.seed
 	header.mod_set_hash = mod_set_hash
-	header.action_layout_hash = source.layout_hash()
-	header.slot_count = effective_config.slot_count
-	header.axes_per_slot = effective_config.axes_per_slot
+	header.action_layout_hash = request.action_layout_hash
+	header.setup_fingerprint = last_build_result.setup_fingerprint
+	header.slot_count = sim.config.slot_count
+	header.axes_per_slot = sim.config.axes_per_slot
 	input_log = InputLog.new(header)
 	_source = source
-	_frame = InputFrame.new(effective_config.slot_count, effective_config.axes_per_slot)
+	_frame = InputFrame.new(sim.config.slot_count, sim.config.axes_per_slot)
 	var err: int = sim.state_changed.connect(_on_sim_state_changed)
 	assert(err == OK)
 	err = sim.period_started.connect(_on_sim_period_started)
@@ -124,8 +107,12 @@ func step_once() -> bool:
 		input_ended.emit()
 		return false
 	_frame.tick = sim.tick_count
+	var frame_commands: Array[Dictionary] = runtime_port.queued_command_snapshots()
 	sim.tick(_frame)
-	input_log.append(_frame)
+	if not sim.last_tick_succeeded:
+		_running = false
+		return false
+	input_log.append(_frame, frame_commands, runtime_port.results_since(0))
 	ticked.emit(sim.tick_count)
 	return true
 
@@ -133,6 +120,11 @@ func step_once() -> bool:
 ## Fraction of the current physics tick elapsed, for presenters that interpolate manually.
 func interpolation_fraction() -> float:
 	return Engine.get_physics_interpolation_fraction()
+
+
+## Typed report for the most recent failed or successful composition attempt.
+func readiness_report() -> MatchReadinessReport:
+	return last_build_result.readiness if last_build_result != null else MatchReadinessReport.new()
 
 
 func _on_sim_state_changed(from_state: StringName, to_state: StringName) -> void:

@@ -18,3 +18,23 @@ func is_available() -> bool:
 ## Includes solver tuning and state in deterministic snapshots.
 func snapshot() -> Dictionary:
 	return {}
+
+
+## True only when contact solving has no state outside its deterministic arguments.
+func is_transaction_stateless() -> bool:
+	return false
+
+
+## True only when [method snapshot] includes every future-affecting solver state value.
+func snapshot_is_complete() -> bool:
+	return is_transaction_stateless()
+
+
+## Captures injected solver state before a transactional operation.
+func transaction_checkpoint() -> SimDependencyCheckpoint:
+	return SimDependencyCheckpoint.stateless() if is_transaction_stateless() else null
+
+
+## Restores a checkpoint; stateful solvers must override this method.
+func restore_transaction_checkpoint(checkpoint: SimDependencyCheckpoint) -> bool:
+	return is_transaction_stateless() and checkpoint != null and checkpoint.complete

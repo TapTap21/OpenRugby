@@ -14,6 +14,7 @@ var last_pickup: PickupResult = PickupResult.new()
 var last_tackle: TackleResult = TackleResult.new()
 var last_spill: TackleResult = TackleResult.new()
 var unresolved_inputs: PackedStringArray = []
+var runtime_port: S2RuntimePort
 
 
 func _init(p_tackle: TackleParams = null, p_catch: CatchParams = null) -> void:
@@ -27,6 +28,7 @@ func system_id() -> StringName:
 
 func tick(_sim: MatchSim) -> void:
 	unresolved_inputs.clear()
+	_process_interaction_commands(_sim)
 
 
 func configure_extensions(points: ExtensionPoints) -> void:
@@ -184,6 +186,37 @@ func snapshot() -> Dictionary:
 	}
 
 
+func snapshot_is_complete() -> bool:
+	return true
+
+
+func transaction_checkpoint() -> SimDependencyCheckpoint:
+	var checkpoint: SimDependencyCheckpoint = SimDependencyCheckpoint.new()
+	checkpoint.complete = true
+	checkpoint.state = {
+		"last_catch": last_catch,
+		"last_fumble": last_fumble,
+		"last_pickup": last_pickup,
+		"last_tackle": last_tackle,
+		"last_spill": last_spill,
+		"unresolved_inputs": unresolved_inputs.duplicate(),
+	}
+	return checkpoint
+
+
+func restore_transaction_checkpoint(checkpoint: SimDependencyCheckpoint) -> bool:
+	if checkpoint == null or not checkpoint.complete:
+		return false
+	var saved: Dictionary = checkpoint.state
+	last_catch = saved["last_catch"]
+	last_fumble = saved["last_fumble"]
+	last_pickup = saved["last_pickup"]
+	last_tackle = saved["last_tackle"]
+	last_spill = saved["last_spill"]
+	unresolved_inputs = saved["unresolved_inputs"].duplicate()
+	return true
+
+
 func _filter_probability(point: StringName, result: RefCounted) -> Variant:
 	if extension_points == null:
 		return result
@@ -218,6 +251,112 @@ func _filter_probability(point: StringName, result: RefCounted) -> Variant:
 		unresolved_inputs += PackedStringArray(["%s returned a probability outside [0,1]" % point])
 		return null
 	return filtered
+
+
+func _process_interaction_commands(sim: MatchSim) -> void:
+	if runtime_port == null:
+		return
+	var ball: BallPhysicsSystem = runtime_port.ball_system()
+	for command: S2RuntimeCommand in runtime_port.commands_for_phase(
+		S2RuntimeCommand.Phase.INTERACTION
+	):
+		var output: S2RuntimeResult = S2RuntimeResult.new()
+		if not command.validate().is_empty():
+			output.status = S2RuntimeResult.Status.REJECTED
+			output.detail = "; ".join(command.validate())
+			runtime_port.complete_command(command, output)
+			return
+		match command.kind:
+			S2RuntimeCommand.Kind.CATCH:
+				var candidate: CandidateState = _candidate_from_command(command.catch_candidate)
+				var gate: GateState = _gate_from_command(command.catch_gate)
+				output.catch_result = resolve_catch(
+					candidate, command.catch_probability, gate, sim.rng
+				)
+				if output.catch_result.resolved:
+					output.status = S2RuntimeResult.Status.SUCCEEDED
+					if output.catch_result.outcome == CatchResult.Outcome.CAUGHT and ball != null:
+						ball.hold_ball()
+				else:
+					output.status = S2RuntimeResult.Status.UNRESOLVED
+					output.detail = "catch command could not resolve"
+			S2RuntimeCommand.Kind.FUMBLE:
+				output.catch_result = resolve_fumble(command.probability, sim.rng)
+				output.status = (
+					S2RuntimeResult.Status.SUCCEEDED
+					if output.catch_result.resolved
+					else S2RuntimeResult.Status.UNRESOLVED
+				)
+				if not output.catch_result.resolved:
+					output.detail = "fumble command could not resolve"
+			S2RuntimeCommand.Kind.PICKUP:
+				output.pickup_result = resolve_pickup(
+					command.ball_held,
+					command.pickup_vertical_separation_m,
+					command.hand_capsule_intersects
+				)
+				output.status = (
+					S2RuntimeResult.Status.SUCCEEDED
+					if output.pickup_result.outcome != PickupResult.Outcome.UNRESOLVED
+					else S2RuntimeResult.Status.UNRESOLVED
+				)
+				if output.pickup_result.accepted and ball != null:
+					ball.hold_ball()
+			S2RuntimeCommand.Kind.TACKLE:
+				output.tackle_result = resolve_tackle(
+					command.defender_tackling,
+					command.defender_has_tackle,
+					command.carrier_strength,
+					command.carrier_strength_ability,
+					command.relative_angle_degrees,
+					command.carrier_break_modifier,
+					sim.rng,
+					command.out_of_position
+				)
+				output.status = (
+					S2RuntimeResult.Status.SUCCEEDED
+					if not output.tackle_result.unresolved
+					else S2RuntimeResult.Status.UNRESOLVED
+				)
+			S2RuntimeCommand.Kind.SPILL:
+				output.tackle_result = resolve_spill(command.probability, sim.rng)
+				var applied: bool = (
+					ball != null
+					and not output.tackle_result.unresolved
+					and (
+						not output.tackle_result.spilled_ball
+						or ball.apply_spill(output.tackle_result)
+					)
+				)
+				output.status = (
+					S2RuntimeResult.Status.SUCCEEDED
+					if applied
+					else S2RuntimeResult.Status.UNRESOLVED
+				)
+				if not applied:
+					output.detail = "spill command could not resolve or commit"
+			_:
+				output.status = S2RuntimeResult.Status.REJECTED
+				output.detail = "command is not owned by the interaction phase"
+		runtime_port.complete_command(command, output)
+		if not runtime_port.tick_succeeded():
+			return
+
+
+func _candidate_from_command(value: S2RuntimeCommand.CandidateState) -> CandidateState:
+	if value == S2RuntimeCommand.CandidateState.NO_CANDIDATE:
+		return CandidateState.NO_CANDIDATE
+	if value == S2RuntimeCommand.CandidateState.SELECTED:
+		return CandidateState.SELECTED
+	return CandidateState.UNRESOLVED
+
+
+func _gate_from_command(value: S2RuntimeCommand.GateState) -> GateState:
+	if value == S2RuntimeCommand.GateState.DISABLED:
+		return GateState.DISABLED
+	if value == S2RuntimeCommand.GateState.ENABLED:
+		return GateState.ENABLED
+	return GateState.UNRESOLVED
 
 
 func _copy_result(source: RefCounted) -> RefCounted:

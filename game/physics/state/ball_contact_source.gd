@@ -16,3 +16,23 @@ func is_available() -> bool:
 ## Stable geometry identity included in the owner system snapshot.
 func snapshot() -> Dictionary:
 	return {}
+
+
+## True only when contact detection has no state outside its deterministic arguments.
+func is_transaction_stateless() -> bool:
+	return false
+
+
+## True only when [method snapshot] includes every future-affecting source state value.
+func snapshot_is_complete() -> bool:
+	return is_transaction_stateless()
+
+
+## Captures injected source state before a transactional operation.
+func transaction_checkpoint() -> SimDependencyCheckpoint:
+	return SimDependencyCheckpoint.stateless() if is_transaction_stateless() else null
+
+
+## Restores a checkpoint; stateful providers must override this method.
+func restore_transaction_checkpoint(checkpoint: SimDependencyCheckpoint) -> bool:
+	return is_transaction_stateless() and checkpoint != null and checkpoint.complete

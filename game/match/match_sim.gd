@@ -23,6 +23,8 @@ var clock: MatchClock
 var flow: MatchStateMachine
 ## Ticks executed so far.
 var tick_count: int = 0
+var s2_runtime_port: S2RuntimePort
+var last_tick_succeeded: bool = true
 
 var _valid: bool = false
 var _finished: bool = false
@@ -74,7 +76,27 @@ func add_system(system: SimSystem) -> void:
 ## Runs one simulation tick with [param frame] as the input.
 func tick(frame: InputFrame) -> void:
 	if not _valid or _finished:
+		last_tick_succeeded = false
 		return
+	var system_checkpoints: Array[SimDependencyCheckpoint] = []
+	var previous_current: InputFrame = null
+	var previous_previous: InputFrame = null
+	var original_tick: int = tick_count
+	var original_rng_state: int = rng.get_state()
+	var original_triggers: Array[StringName] = _pending_triggers.duplicate()
+	if s2_runtime_port != null:
+		for system: SimSystem in _systems:
+			var checkpoint: SimDependencyCheckpoint = system.transaction_checkpoint()
+			if checkpoint == null or not checkpoint.complete:
+				s2_runtime_port.fail_tick(
+					"%s could not create a tick checkpoint" % system.system_id()
+				)
+				last_tick_succeeded = false
+				return
+			system_checkpoints.append(checkpoint)
+		previous_current = _copy_frame(_current)
+		previous_previous = _copy_frame(_previous)
+		s2_runtime_port.begin_tick()
 	tick_count += 1
 	_previous.copy_from(_current)
 	if frame.slot_count == _current.slot_count and frame.axes_per_slot == _current.axes_per_slot:
@@ -85,6 +107,22 @@ func tick(frame: InputFrame) -> void:
 		_current.tick = frame.tick
 	for system: SimSystem in _systems:
 		system.tick(self)
+		if s2_runtime_port != null and not s2_runtime_port.tick_succeeded():
+			break
+	if s2_runtime_port != null and not s2_runtime_port.tick_succeeded():
+		for index: int in range(_systems.size() - 1, -1, -1):
+			if not _systems[index].restore_transaction_checkpoint(system_checkpoints[index]):
+				s2_runtime_port.fail_tick(
+					"%s failed to restore its tick checkpoint" % _systems[index].system_id()
+				)
+		rng.set_state(original_rng_state)
+		tick_count = original_tick
+		_current.copy_from(previous_current)
+		_previous.copy_from(previous_previous)
+		_pending_triggers = original_triggers
+		s2_runtime_port.rollback_tick()
+		last_tick_succeeded = false
+		return
 	var def: MatchStateDef = flow.current_def()
 	if def.clock_runs:
 		clock.advance()
@@ -93,6 +131,9 @@ func tick(frame: InputFrame) -> void:
 	if transition != null:
 		_apply_transition(transition)
 	_pending_triggers.clear()
+	if s2_runtime_port != null:
+		s2_runtime_port.commit_tick()
+	last_tick_succeeded = true
 
 
 ## Queues [param trigger] for evaluation in the current or next tick.
@@ -162,7 +203,15 @@ func snapshot() -> Dictionary:
 		"input_buttons": _current.buttons.duplicate(),
 		"input_axes": _current.axes.duplicate(),
 		"systems": systems_data,
+		"s2_runtime": s2_runtime_port.snapshot() if s2_runtime_port != null else {},
+		"last_tick_succeeded": last_tick_succeeded,
 	}
+
+
+func _copy_frame(source: InputFrame) -> InputFrame:
+	var copy: InputFrame = InputFrame.new(source.slot_count, source.axes_per_slot)
+	copy.copy_from(source)
+	return copy
 
 
 ## Lowercase hex SHA-256 of the serialised snapshot.

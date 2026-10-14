@@ -23,3 +23,23 @@ func tick(_sim: MatchSim) -> void:
 ## Returns this system's state for hashing and snapshots.
 func snapshot() -> Dictionary:
 	return {}
+
+
+## True only when this system has no mutable state a failed S2 tick could affect.
+func is_transaction_stateless() -> bool:
+	return false
+
+
+## True only when [method snapshot] contains all state that can affect a future tick.
+func snapshot_is_complete() -> bool:
+	return false
+
+
+## Captures state before a composed S2 tick; stateful systems must override this method.
+func transaction_checkpoint() -> SimDependencyCheckpoint:
+	return SimDependencyCheckpoint.stateless() if is_transaction_stateless() else null
+
+
+## Restores a checkpoint; stateful systems must override this method.
+func restore_transaction_checkpoint(checkpoint: SimDependencyCheckpoint) -> bool:
+	return is_transaction_stateless() and checkpoint != null and checkpoint.complete

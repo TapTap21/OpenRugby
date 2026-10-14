@@ -79,7 +79,7 @@ static func declare_into(points: ExtensionPoints) -> void:
 		points,
 		PHYSICS_WIND_PROVIDER,
 		ExtensionPoints.Kind.PROVIDER,
-		"Provide injected Vector3 wind in km/h."
+		"Provide an explicit S2WindPolicy including enablement and Vector3 wind in km/h."
 	)
 
 

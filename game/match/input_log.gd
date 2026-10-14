@@ -2,13 +2,14 @@ class_name InputLog
 extends RefCounted
 ## Recorded input frames plus a [ReplayHeader]; the tick of a frame is its index.
 
-const FORMAT_VERSION: int = 1
+const FORMAT_VERSION: int = ReplayHeader.CURRENT_FORMAT_VERSION
 const _MAGIC: PackedByteArray = [0x4F, 0x52, 0x4C, 0x47]
 
 var header: ReplayHeader
 
 var _buttons: PackedInt64Array = PackedInt64Array()
 var _axes: PackedInt32Array = PackedInt32Array()
+var _runtime_frames: Array[Dictionary] = []
 var _frame_count: int = 0
 
 
@@ -50,6 +51,35 @@ static func from_bytes(bytes: PackedByteArray) -> InputLog:
 	log._buttons = buttons
 	log._axes = axes
 	log._frame_count = frames
+	if header.format_version >= 2:
+		if not d.has("runtime") or typeof(d["runtime"]) != TYPE_ARRAY:
+			return null
+		var runtime: Array = d["runtime"]
+		if runtime.size() != frames:
+			return null
+		for runtime_frame: Variant in runtime:
+			if (
+				typeof(runtime_frame) != TYPE_DICTIONARY
+				or not runtime_frame.has("commands")
+				or typeof(runtime_frame["commands"]) != TYPE_ARRAY
+				or not runtime_frame.has("outputs")
+				or typeof(runtime_frame["outputs"]) != TYPE_ARRAY
+			):
+				return null
+			var commands: Array[Dictionary] = []
+			var outputs: Array[Dictionary] = []
+			for command: Variant in runtime_frame["commands"]:
+				if typeof(command) != TYPE_DICTIONARY:
+					return null
+				commands.append(command)
+			for output: Variant in runtime_frame["outputs"]:
+				if typeof(output) != TYPE_DICTIONARY:
+					return null
+				outputs.append(output)
+			log._runtime_frames.append({"commands": commands, "outputs": outputs})
+	else:
+		for _frame: int in frames:
+			log._runtime_frames.append({"commands": [], "outputs": []})
 	return log
 
 
@@ -62,12 +92,17 @@ static func load_file(path: String) -> InputLog:
 
 
 ## Appends [param frame]; ignored (with an error) when its shape does not match the header.
-func append(frame: InputFrame) -> void:
+func append(
+	frame: InputFrame, commands: Array[Dictionary] = [], outputs: Array[Dictionary] = []
+) -> void:
 	if frame.slot_count != header.slot_count or frame.axes_per_slot != header.axes_per_slot:
 		push_error("InputLog.append: frame shape does not match the header")
 		return
 	_buttons.append_array(frame.buttons)
 	_axes.append_array(frame.axes)
+	_runtime_frames.append(
+		{"commands": commands.duplicate(true), "outputs": outputs.duplicate(true)}
+	)
 	_frame_count += 1
 
 
@@ -90,12 +125,27 @@ func read_frame(index: int, into: InputFrame) -> bool:
 	return true
 
 
+## Recorded typed commands for frame [param index], preserving the original sequence values.
+func frame_commands(index: int) -> Array[Dictionary]:
+	if index < 0 or index >= _runtime_frames.size():
+		return []
+	return _runtime_frames[index]["commands"].duplicate(true)
+
+
+## Recorded typed outputs for frame [param index].
+func frame_outputs(index: int) -> Array[Dictionary]:
+	if index < 0 or index >= _runtime_frames.size():
+		return []
+	return _runtime_frames[index]["outputs"].duplicate(true)
+
+
 ## Serialises the log.
 func to_bytes() -> PackedByteArray:
 	var d: Dictionary = {
 		"header": header.to_dict(),
 		"buttons": _buttons,
 		"axes": _axes,
+		"runtime": _runtime_frames,
 	}
 	var out: PackedByteArray = _MAGIC.duplicate()
 	out.append_array(var_to_bytes(d))

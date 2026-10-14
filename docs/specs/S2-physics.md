@@ -220,7 +220,7 @@ using them:
 | `physics.tackle_resolve` | FILTER | After base contact/break probability is computed, before roll; value is `TackleResult` with probability override. |
 | `physics.fumble_resolve` | FILTER | Immediately before fumble roll; value carries probability. |
 | `physics.ball_spill` | FILTER | Immediately before spill roll; value carries probability and allowed velocity scale range. |
-| `physics.wind_provider` | PROVIDER | Called once when constructing the match-local wind value; argument is typed match/config context; non-null return is deterministic `Vector3` km/h. Resolve one provider by declared deterministic precedence and document conflicts. |
+| `physics.wind_provider` | PROVIDER | Called once when constructing match-local wind setup; argument is typed match/config context; non-null return is an explicit `S2WindPolicy` with enablement and finite `Vector3` km/h. Resolve one provider by declared deterministic precedence and document conflicts. |
 
 The RE notes label the first seven script hooks as callable hooks and names a provider for wind;
 S1’s `ExtensionPoints` supports observer/filter/provider only. This brief standardizes them as filters
@@ -450,3 +450,32 @@ The following behavior gaps remain unresolved. Entries carrying `unk_` IDs are r
   reside in S2.
 - The author’s implementation passes project gates, then receives separate code, fidelity and
   architecture reviewers as required by PLAN. This spec author does not self-review implementation.
+
+## 10. Runtime composition and replay implementation contract
+
+`MatchCompositionBuilder` is the canonical composition path for live `MatchRunner` starts and
+`MatchReplay` runs. Both paths register caller systems and extension-provided systems first, followed
+by `s2_locomotion`, `s2_ball_physics`, and `s2_interactions`. A typed `MatchBuildResult` reports
+unavailable capabilities through `MatchReadinessReport`; missing geometry or the contact solver is
+a construction blocker, not a request to synthesize contacts or use scalar damping.
+
+Callers provide ball initialization, player and fatigue setup, environment values, contact
+dependencies, and sequenced `S2RuntimeCommand` inputs through `S2RuntimePort`. The port publishes
+typed `S2RuntimeResult` records. It accepts resolved values only and does not implement S9 action
+mapping, pass/catch selection, fatigue ownership, wind derivation, or goal-kick policy. Initial
+`BallMode` and `GoalKickState` are explicit. `GoalKickState.OFF` is an owner choice; `ACTIVE` also
+requires an owner-supplied wind policy. Extension wind providers also return an explicit
+`S2WindPolicy`; the builder never turns a vector into an enabled/disabled decision.
+
+Replay header format 2 stores a setup fingerprint over effective config and resources, ordered
+systems, extension point and hook configuration, mod/action-layout identity, environment and player
+setup, contact providers, resolved wind policy, and tick rate. Each input frame also stores ordered
+command records and the corresponding typed outputs. A replay requires matching setup identity and
+checks each frame's command results.
+
+Each S2 tick is transactional across all registered systems, contact source and solver, `SimRng`,
+pending commands and results, players, interaction outcomes, ball pose and solver accumulator. A
+dependency must explicitly declare itself stateless or provide complete snapshots and typed
+checkpoint/restore methods; otherwise composition is blocked and no replay-completeness claim is
+made. This contract does not make S2 runnable by itself: Classic stadium geometry, the
+contract-complete LCP solver, and caller-owned player/fatigue/action inputs remain required.

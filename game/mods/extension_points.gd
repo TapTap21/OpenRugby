@@ -46,14 +46,23 @@ func description_of(point: StringName) -> String:
 ## Returns [constant ERR_DOES_NOT_EXIST] for an undeclared point and
 ## [constant ERR_INVALID_PARAMETER] for an invalid callable.
 func register(
-	point: StringName, mod_id: StringName, callable: Callable, priority: int = 0
+	point: StringName,
+	mod_id: StringName,
+	callable: Callable,
+	priority: int = 0,
+	stateless_for_match: bool = false,
+	setup_fingerprint: String = ""
 ) -> Error:
 	var entry: _Point = _points.get(point)
 	if entry == null:
 		return ERR_DOES_NOT_EXIST
 	if not callable.is_valid():
 		return ERR_INVALID_PARAMETER
-	entry.hooks.append(_Hook.new(mod_id, callable, priority, _next_sequence))
+	entry.hooks.append(
+		_Hook.new(
+			mod_id, callable, priority, _next_sequence, stateless_for_match, setup_fingerprint
+		)
+	)
 	_next_sequence += 1
 	entry.hooks.sort_custom(_hook_less)
 	return OK
@@ -120,6 +129,50 @@ func declared_points() -> PackedStringArray:
 	return PackedStringArray(names)
 
 
+## Returns whether every hook used by match composition declares itself stateless.
+func match_hooks_are_stateless() -> bool:
+	for point: StringName in _points:
+		if not _is_match_point(point):
+			continue
+		var entry: _Point = _points[point]
+		for hook: _Hook in entry.hooks:
+			if not hook.stateless_for_match or hook.setup_fingerprint.is_empty():
+				return false
+	return true
+
+
+## Returns a deterministic, callback-free description of extension setup.
+func configuration_snapshot() -> Dictionary:
+	var result: Dictionary = {}
+	for point_name: String in declared_points():
+		var point: StringName = StringName(point_name)
+		var entry: _Point = _points[point]
+		var hooks_data: Array[Dictionary] = []
+		for hook: _Hook in entry.hooks:
+			var script_path: String = ""
+			var callback_object: Object = hook.callable.get_object()
+			if callback_object != null:
+				var script: Script = callback_object.get_script() as Script
+				if script != null:
+					script_path = script.resource_path
+			(
+				hooks_data
+				. append(
+					{
+						"mod_id": hook.mod_id,
+						"priority": hook.priority,
+						"sequence": hook.sequence,
+						"method": hook.callable.get_method(),
+						"script_path": script_path,
+						"stateless_for_match": hook.stateless_for_match,
+						"setup_fingerprint": hook.setup_fingerprint,
+					}
+				)
+			)
+		result[point] = {"kind": entry.kind, "description": entry.description, "hooks": hooks_data}
+	return result
+
+
 func _check_kind(point: StringName, kind: Kind) -> bool:
 	var entry: _Point = _points.get(point)
 	if entry == null:
@@ -150,6 +203,14 @@ static func _hook_less(left: _Hook, right: _Hook) -> bool:
 	return left.sequence < right.sequence
 
 
+func _is_match_point(point: StringName) -> bool:
+	return (
+		point == BaseExtensionPoints.MATCH_FLOW_CONFIG
+		or point == BaseExtensionPoints.MATCH_SIM_SYSTEMS
+		or String(point).begins_with("physics.")
+	)
+
+
 ## One declared point.
 class _Point:
 	extends RefCounted
@@ -171,11 +232,20 @@ class _Hook:
 	var callable: Callable = Callable()
 	var priority: int = 0
 	var sequence: int = 0
+	var stateless_for_match: bool = false
+	var setup_fingerprint: String = ""
 
 	func _init(
-		p_mod_id: StringName, p_callable: Callable, p_priority: int, p_sequence: int
+		p_mod_id: StringName,
+		p_callable: Callable,
+		p_priority: int,
+		p_sequence: int,
+		p_stateless_for_match: bool,
+		p_setup_fingerprint: String
 	) -> void:
 		mod_id = p_mod_id
 		callable = p_callable
 		priority = p_priority
 		sequence = p_sequence
+		stateless_for_match = p_stateless_for_match
+		setup_fingerprint = p_setup_fingerprint
