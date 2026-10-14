@@ -13,8 +13,12 @@ extends Resource
 @export var wind_km_h_to_m_s: float = 1.0 / 3.6
 @export var max_contacts_per_step: int = 16
 @export var goal_post_center_x_m: float = 2.845
+## RE 06 §2.1 observed post spacing, metres.
+@export var goal_width_m: float = 5.6
 @export var goal_line_z_m: float = 50.0
 @export var post_hit_band_m: float = 0.3
+## RE 06 §2.4 observed event envelope around the goal line and centre, metres.
+@export var post_monitor_range_m: float = 5.0
 @export var post_low_zone_height_m: float = 2.26
 @export var crossbar_height_m: float = 3.0
 @export var drag_speed_low_m_s: float = 15.0

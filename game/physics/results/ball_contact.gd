@@ -10,9 +10,6 @@ var normal: Vector3 = Vector3.UP
 var penetration_m: float = 0.0
 var source_subfeature_id: int = 0
 var detection_ordinal: int = 0
-var restitution: float = 0.0
-var friction: float = 0.0
-var rolling_resistance: float = 0.0
 
 
 ## Returns the required total deterministic ordering key.

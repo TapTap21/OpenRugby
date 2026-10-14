@@ -8,6 +8,11 @@ func detect_contacts(_position_m: Vector3, _orientation: Quaternion) -> Array[Ba
 	return []
 
 
+## True only when a stadium geometry owner has supplied stable deterministic data.
+func is_available() -> bool:
+	return false
+
+
 ## Stable geometry identity included in the owner system snapshot.
 func snapshot() -> Dictionary:
 	return {}

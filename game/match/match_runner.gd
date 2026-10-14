@@ -28,9 +28,18 @@ func start(
 	source: InputSource,
 	systems: Array[SimSystem] = [],
 	mod_set_hash: String = "",
-	extension_points: ExtensionPoints = null
+	extension_points: ExtensionPoints = null,
+	contact_source: BallContactSource = null,
+	contact_solver: BallContactSolver = null
 ) -> Error:
 	if Engine.physics_ticks_per_second != MatchSim.TICKS_PER_SECOND:
+		return ERR_UNCONFIGURED
+	if (
+		contact_source == null
+		or contact_solver == null
+		or not contact_source.is_available()
+		or not contact_solver.is_available()
+	):
 		return ERR_UNCONFIGURED
 	var effective_config: MatchConfig = config.duplicate(true) as MatchConfig
 	if extension_points != null:
@@ -59,7 +68,10 @@ func start(
 		sim.add_system(system)
 	sim.add_system(LocomotionSystem.new(effective_config.s2_physics.locomotion))
 	var ball_system: BallPhysicsSystem = BallPhysicsSystem.new(
-		effective_config.s2_physics.ball, effective_config.s2_physics.surfaces
+		effective_config.s2_physics.ball,
+		effective_config.s2_physics.surfaces,
+		contact_source,
+		contact_solver
 	)
 	ball_system.pitch_condition = effective_config.s2_physics.pitch_condition
 	ball_system.stadium_id = effective_config.s2_physics.stadium_id

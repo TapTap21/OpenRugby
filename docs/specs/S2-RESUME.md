@@ -10,15 +10,14 @@
 
 ## Progress
 
-- Read root `AGENTS.md`, PLAN §§2b/4, conventions, ADR-001/004, S2 spec, RE 06, and RE 09.
+- Read root `AGENTS.md`, PLAN §§2/2b/4, conventions, ADR-001/004, S2 spec, RE 06, and RE 09.
 - Confirmed S1 provides ordered `SimSystem` registration, deterministic per-system snapshots, `MatchRunner` composition hooks, and typed extension point registry. S1 has no player fatigue snapshot service yet.
-- Next: add typed S2 runtime values, parameter Resources and deterministic systems; wire extension points and the mandatory S2 system bundle into MatchRunner; then run format/lint/hygiene gates (never Godot without safety script).
+- S2 runtime values, parameter Resources, deterministic systems and extension points are implemented at the requested baseline; this blocker-fix round leaves Classic contact unavailable behind required geometry/solver injection.
 
 ## Unresolved implementation gaps to track
 
 - S1 has no player/team roster match-state or fatigue owner yet. S2 inputs must remain typed/injected; no profiles or fatigue values are fabricated.
-- PID gains, pass/catch candidate policy and mappings, wind policy, several tackle action bindings, place-kick meter, and contact geometry provider remain unresolved per S2 spec §8. Dependent paths must report unavailable until injected.
-- Deterministic geometry input is synthetic/injected; stadium collision mesh integration is outside this slice's available S1 state.
+- PID gains, pass/catch candidate policy and mappings, wind policy, several tackle action bindings, place-kick meter, and stadium contact geometry remain unresolved per S2 spec §8. Dependent paths must report unavailable until injected.
 
 ## Implemented checkpoint
 
@@ -26,12 +25,20 @@
 - Added `MatchStateDef.simulation_active`; the Classic flow marks kickoff/in-play/stoppage simulation-active. The flow owner decides lifecycle activity through data. S2 solver still gates on free-flight/rolling ball mode after earlier systems have run.
 - `MatchRunner` registers S2 in this fixed tail order after caller base systems and declared provider systems: `s2_locomotion` → `s2_ball_physics` → `s2_interactions`. The base/provider systems therefore prepare inputs/actions before the ball solver; interactions publish typed outcomes after it. Both Classic and modded runs use this same tail.
 - The accumulator starts at 0, adds 200 only at the active/free-ball gate, subtracts threshold 60 per 0.005 s step, and is included in the ball system snapshot. Ball pose, velocities, mode, tuning values, wind inputs, pitch selection, pending contacts, outputs and diagnostics are snapshotted. MatchSim already snapshots its shared RNG state.
-- Added force/drag, orientation-projected ellipsoid area, ground-plane contact, deterministic contact ordering/cap, pitch restitution/friction, predictor, kick/pass builders, pickup/fumble formulas, standard tackle/break and big-hit formulas, spill results, and declared extension points. Hooks validate result types and bounds before use.
+- Added force/drag, orientation-projected ellipsoid area, ground-plane contact, deterministic contact ordering/cap, pitch response inputs, predictor, kick/pass builders, pickup/fumble formulas, standard tackle/break and big-hit formulas, spill results, and declared extension points. Hooks validate result types and bounds before use.
+
+## Current blocker-fix status
+
+- `BallPathPredictor` now selects the later/descending root, repeats bounce segments while time remains, switches to rolling only after the first segment when hop time is below 0.01 s, and caps rolling advancement at `min(remaining, 1.25)`. This remains separate from the rigid-body solver.
+- The public hook payload is `ContactResult`; detector identity/geometry lives in `BallContact`, while the result carries separate restitution, friction and rolling-response values. Hook attempts to change identity are rejected; response values are checked against S2 §5 bounds.
+- Pending contact snapshots now include exact point, normal and penetration values plus every stable identity field, alongside the quantized sort key and derived restitution, friction and rolling response. Surface and solver inputs are snapshotted separately.
+- `MatchRunner.start()` requires injected, available `BallContactSource` and `BallContactSolver`; missing or base-unimplemented dependencies return `ERR_UNCONFIGURED`. No Classic stadium mesh provider or justified LCP solver exists here. Contact steps roll back their state and accumulator if an injected solver declines the rows. The Classic contact path is unavailable until both owners are supplied; scalar reflection/damping has been removed.
+- Contact processing follows sort → response construction/hook → injected solve → post/crossbar classification. Classifier gates use the RE envelope (within 5 m of either goal line and |x| < 5 m); crossbar uses |y−3| < 0.3 m and |x| < 2.5 m, then pad/upright split at y=2.26 m.
+- Catch selection remains unavailable until the interaction owner injects typed selected/no-candidate and gate states to `resolve_catch`; the system does not select a candidate or infer the unresolved gate. Provisional values remain caller/fixture supplied.
 
 ## Remaining integration gaps
 
-- `BallContactSource` is the typed deterministic mesh-contact interface; the stadium mesh decoder/provider is absent. Only ground-plane ellipsoid contact is detected in this slice. Callers may inject deterministic contacts; no PhysicsServer/Jolt queries are used.
-- Contact response currently resolves translational normal and Coulomb friction impulses. The full multi-contact LCP and angular impulse solve are not implemented. Rolling/twist torque is left visibly unresolved because RE 06 does not recover its form.
+- The stadium collision mesh decoder/provider and a behaviorally justified normal/friction/rolling LCP solver are absent. The new runner dependencies are injection points, not claims of Classic fidelity. No PhysicsServer/Jolt queries are used.
 - No S1 roster/fatigue owner exists. Locomotion requires per-player stats, sprint request/urgency, fatigue snapshot (captured pre-advance), fatigue option and pitch condition. Until injected, it records unresolved inputs and does not update that player. Turn PID gains and the S9 action-to-motion mapping remain unresolved.
 - Ball mode and goal-kick state, locomotion initial state and sprint request, environment pitch/stadium values, fatigue option and player fatigue snapshots begin explicitly unresolved. Their owners must inject these before dependent behavior runs.
 - The pure kick/pass builders and ball commit methods are available, but no S1/S9 action queue currently connects user actions to them. Unknown pass type/target-height mappings, catch gate/candidate selection, place-kick meter output and tackle action mappings remain unavailable until owning callers inject them.
@@ -40,6 +47,10 @@
 
 ## Verification status
 
-- `gdlint`, `gdformat --check --line-length 100` and `scripts/hygiene.sh` passed.
-- After `scripts/check-godot-safe.sh`, a Godot 4.7.2 headless editor scan reported no script parse errors. It did log existing missing `localization/translations.en.translation`, socket creation failures, and an unwritable global editor settings path; the editor could not save those global settings.
-- No tests were authored or read. The test suite was not run.
+- `gdlint .`: PASS — `Success: no problems found`.
+- `gdformat --check --line-length 100` on the eight changed GDScript files: PASS — `8 files would be left unchanged`.
+- `scripts/hygiene.sh`: PASS — `hygiene: ok`.
+- `git diff --check`: PASS — exit 0, no output.
+- Repository-wide `gdformat --check --line-length 100 .`: FAIL on existing vendored `addons/gdUnit4` files (210 requested reformats) and parser error in `addons/gdUnit4/src/doubler/GdUnitClassDoubler.gd`. No vendored files were changed.
+- No tests or Godot commands were run, as required for this fix round.
+- Root `.omc/HANDOFF.md` and `.omc/research/PHASE1_BRIEF.md` were absent in this worktree; tracked project rules and RE specs were used.

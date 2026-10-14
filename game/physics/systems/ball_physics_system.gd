@@ -8,6 +8,7 @@ const TICK_NUMERATOR: int = 200
 var params: BallPhysicsParams
 var surfaces: PitchSurfaceTable
 var contact_source: BallContactSource
+var contact_solver: BallContactSolver
 var pitch_condition: int = -1
 var stadium_id: int = -1
 var extension_points: ExtensionPoints
@@ -24,9 +25,16 @@ var last_post_part: int = 0
 var mod_issues: PackedStringArray = []
 
 
-func _init(p_params: BallPhysicsParams = null, p_surfaces: PitchSurfaceTable = null) -> void:
+func _init(
+	p_params: BallPhysicsParams = null,
+	p_surfaces: PitchSurfaceTable = null,
+	p_contact_source: BallContactSource = null,
+	p_contact_solver: BallContactSolver = null
+) -> void:
 	params = p_params
 	surfaces = p_surfaces
+	contact_source = p_contact_source
+	contact_solver = p_contact_solver
 
 
 ## Initializes a newly created body and consumes its observed per-axis spin jitter draws.
@@ -80,10 +88,20 @@ func tick(sim: MatchSim) -> void:
 			["goal-kick wind policy is unresolved; solver step unavailable"]
 		)
 		return
+	var state_before_tick: BallState = _copy_ball_state(state)
+	var accumulator_before_tick: int = state.solver_accumulator
+	var post_part_before_tick: int = last_post_part
 	state.solver_accumulator += TICK_NUMERATOR
 	while state.solver_accumulator >= ACCUMULATOR_THRESHOLD:
 		state.solver_accumulator -= ACCUMULATOR_THRESHOLD
-		_integrate_step(float(params.solver_step_numerator) / float(params.solver_step_denominator))
+		if not _integrate_step(
+			float(params.solver_step_numerator) / float(params.solver_step_denominator)
+		):
+			state = state_before_tick
+			state.solver_accumulator = accumulator_before_tick
+			last_post_part = post_part_before_tick
+			last_substeps = 0
+			return
 		last_substeps += 1
 
 
@@ -94,6 +112,7 @@ func snapshot() -> Dictionary:
 		"params": _resource_snapshot(params),
 		"surfaces": _resource_snapshot(surfaces),
 		"contact_source": contact_source.snapshot() if contact_source != null else {},
+		"contact_solver": contact_solver.snapshot() if contact_solver != null else {},
 		"pitch_condition": pitch_condition,
 		"stadium_id": stadium_id,
 		"match_active": match_active,
@@ -281,17 +300,17 @@ func filter_pass_launch(launch: PassLaunch) -> PassLaunch:
 	return launch
 
 
-func _integrate_step(dt: float) -> void:
+func _integrate_step(dt: float) -> bool:
 	if state.goal_kick_state == BallState.GoalKickState.UNRESOLVED:
 		mod_issues += PackedStringArray(
 			["ball goal-kick state is unresolved; solver step unavailable"]
 		)
-		return
+		return false
 	if state.goal_kick_state == BallState.GoalKickState.ACTIVE and not wind_policy_resolved:
 		mod_issues += PackedStringArray(
 			["goal-kick wind policy is unresolved; solver step unavailable"]
 		)
-		return
+		return false
 	var wind: Vector3 = wind_km_h if wind_enabled else Vector3.ZERO
 	state.linear_velocity_m_s += acceleration_m_s2(state.linear_velocity_m_s, wind) * dt
 	state.position_m += state.linear_velocity_m_s * dt
@@ -310,13 +329,27 @@ func _integrate_step(dt: float) -> void:
 		var resize_error: Error = contacts.resize(params.max_contacts_per_step)
 		if resize_error != OK:
 			mod_issues += PackedStringArray(["could not apply deterministic contact cap"])
+	var responses: Array[ContactResult] = []
 	for contact: BallContact in contacts:
-		_classify_post_hit(contact.point_m)
-		var response: BallContact = _filter_contact(contact)
+		var response: ContactResult = _filter_contact(contact)
 		if response == null:
-			continue
-		_solve_contact(response)
+			return false
+		responses.append(response)
+	if not contacts.is_empty():
+		if contact_source == null or contact_solver == null:
+			mod_issues += PackedStringArray(
+				["ball contact path unavailable: stadium geometry and contact solver are required"]
+			)
+			return false
+		if not contact_solver.solve_contacts(state, contacts, responses, dt):
+			mod_issues += PackedStringArray(
+				["ball contact path unavailable: injected contact solver did not resolve rows"]
+			)
+			return false
+		for contact: BallContact in contacts:
+			_classify_post_hit(contact.point_m)
 	pending_contacts.clear()
+	return true
 
 
 func _detect_contacts() -> Array[BallContact]:
@@ -395,7 +428,7 @@ func _ellipsoid_radius(direction: Vector3) -> float:
 	return 1.0 / sqrt(denominator)
 
 
-func _filter_contact(contact: BallContact) -> BallContact:
+func _filter_contact(contact: BallContact) -> ContactResult:
 	var surface: PitchSurfaceParams = null
 	if surfaces != null and pitch_condition >= 0 and pitch_condition <= 5:
 		surface = surfaces.get_for(pitch_condition, stadium_id)
@@ -403,21 +436,22 @@ func _filter_contact(contact: BallContact) -> BallContact:
 		mod_issues += PackedStringArray(["pitch surface response is unresolved"])
 		return null
 	var local_normal: Vector3 = state.orientation.inverse() * contact.normal.normalized()
-	contact.restitution = surface.restitution(local_normal.y)
-	contact.friction = surface.friction
-	contact.rolling_resistance = surface.rolling_resistance
+	var response: ContactResult = ContactResult.create(contact)
+	response.restitution = surface.restitution(local_normal.y)
+	response.friction = surface.friction
+	response.rolling_resistance = surface.rolling_resistance
 	if extension_points != null:
 		var filtered: Variant = extension_points.filter(
-			BaseExtensionPoints.PHYSICS_BALL_CONTACT, _copy_contact(contact)
+			BaseExtensionPoints.PHYSICS_BALL_CONTACT, _copy_contact_result(response)
 		)
-		if filtered is BallContact:
+		if filtered is ContactResult:
 			@warning_ignore("unsafe_cast")
-			var filtered_contact: BallContact = filtered
-			if _same_contact_identity(contact, filtered_contact):
+			var filtered_contact: ContactResult = filtered
+			if _same_contact_identity(response, filtered_contact):
 				if _valid_contact_response(filtered_contact):
-					contact.restitution = filtered_contact.restitution
-					contact.friction = filtered_contact.friction
-					contact.rolling_resistance = filtered_contact.rolling_resistance
+					response.restitution = filtered_contact.restitution
+					response.friction = filtered_contact.friction
+					response.rolling_resistance = filtered_contact.rolling_resistance
 				else:
 					mod_issues += PackedStringArray(
 						["physics.ball_contact response is outside bounds"]
@@ -428,10 +462,10 @@ func _filter_contact(contact: BallContact) -> BallContact:
 				)
 		else:
 			mod_issues += PackedStringArray(["physics.ball_contact returned the wrong type"])
-	return contact
+	return response
 
 
-func _valid_contact_response(contact: BallContact) -> bool:
+func _valid_contact_response(contact: ContactResult) -> bool:
 	return (
 		is_finite(contact.restitution)
 		and contact.restitution >= 0.0
@@ -445,7 +479,7 @@ func _valid_contact_response(contact: BallContact) -> bool:
 	)
 
 
-func _same_contact_identity(left: BallContact, right: BallContact) -> bool:
+func _same_contact_identity(left: ContactResult, right: ContactResult) -> bool:
 	return (
 		left.body_id == right.body_id
 		and left.feature_id == right.feature_id
@@ -479,33 +513,21 @@ func _valid_vector(value: Vector3, limit: float = 100.0) -> bool:
 	)
 
 
-func _solve_contact(contact: BallContact) -> void:
-	if contact.normal.length_squared() <= 0.0:
-		return
-	var normal: Vector3 = contact.normal.normalized()
-	if contact.penetration_m > 0.0:
-		state.position_m += normal * contact.penetration_m
-	var normal_speed: float = state.linear_velocity_m_s.dot(normal)
-	if normal_speed < 0.0:
-		state.linear_velocity_m_s -= (1.0 + contact.restitution) * normal_speed * normal
-	var tangent: Vector3 = (
-		state.linear_velocity_m_s - state.linear_velocity_m_s.dot(normal) * normal
-	)
-	state.linear_velocity_m_s -= tangent * clampf(contact.friction, 0.0, 1.0)
-	state.angular_velocity_rad_s *= 1.0 - clampf(contact.rolling_resistance, 0.0, 1.0) * 0.005
-
-
 func _classify_post_hit(point: Vector3) -> void:
 	if (
-		absf(absf(point.x) - params.goal_post_center_x_m) < params.post_hit_band_m
-		and absf(point.z) >= params.goal_line_z_m - params.post_hit_band_m
+		absf(absf(point.z) - params.goal_line_z_m) >= params.post_monitor_range_m
+		or absf(point.x) >= params.post_monitor_range_m
 	):
-		last_post_part = 3 if point.y < params.post_low_zone_height_m else 1
-	elif (
-		absf(point.z) >= params.goal_line_z_m - params.post_hit_band_m
-		and absf(point.y - params.crossbar_height_m) <= params.post_hit_band_m
+		return
+	if (
+		absf(point.y - params.crossbar_height_m) < params.post_hit_band_m
+		and absf(point.x) < params.goal_width_m * 0.5 - params.post_hit_band_m
 	):
 		last_post_part = 2
+	elif point.y < params.post_low_zone_height_m:
+		last_post_part = 3
+	else:
+		last_post_part = 1
 
 
 func _contact_less(left: BallContact, right: BallContact) -> bool:
@@ -535,8 +557,8 @@ func _copy_pass_launch(source: PassLaunch) -> PassLaunch:
 	return copy
 
 
-func _copy_contact(source: BallContact) -> BallContact:
-	var copy: BallContact = BallContact.new()
+func _copy_contact_result(source: ContactResult) -> ContactResult:
+	var copy: ContactResult = ContactResult.new()
 	copy.body_id = source.body_id
 	copy.feature_id = source.feature_id
 	copy.contact_kind = source.contact_kind
@@ -548,6 +570,18 @@ func _copy_contact(source: BallContact) -> BallContact:
 	copy.restitution = source.restitution
 	copy.friction = source.friction
 	copy.rolling_resistance = source.rolling_resistance
+	return copy
+
+
+func _copy_ball_state(source: BallState) -> BallState:
+	var copy: BallState = BallState.new()
+	copy.position_m = source.position_m
+	copy.orientation = source.orientation
+	copy.linear_velocity_m_s = source.linear_velocity_m_s
+	copy.angular_velocity_rad_s = source.angular_velocity_rad_s
+	copy.mode = source.mode
+	copy.goal_kick_state = source.goal_kick_state
+	copy.solver_accumulator = source.solver_accumulator
 	return copy
 
 
@@ -574,5 +608,32 @@ func _property_name(property: Dictionary) -> String:
 func _contacts_snapshot(contacts: Array[BallContact]) -> Array[Dictionary]:
 	var result: Array[Dictionary] = []
 	for contact: BallContact in contacts:
-		result += [{"key": contact.sort_key(), "penetration": contact.penetration_m}]
+		result += [
+			{
+				"key": contact.sort_key(),
+				"body_id": contact.body_id,
+				"feature_id": contact.feature_id,
+				"contact_kind": contact.contact_kind,
+				"point_m": [contact.point_m.x, contact.point_m.y, contact.point_m.z],
+				"normal": [contact.normal.x, contact.normal.y, contact.normal.z],
+				"penetration_m": contact.penetration_m,
+				"source_subfeature_id": contact.source_subfeature_id,
+				"detection_ordinal": contact.detection_ordinal,
+				"response": _contact_response_snapshot(contact),
+			}
+		]
 	return result
+
+
+func _contact_response_snapshot(contact: BallContact) -> Dictionary:
+	if surfaces == null or pitch_condition < 0 or pitch_condition > 5:
+		return {}
+	var surface: PitchSurfaceParams = surfaces.get_for(pitch_condition, stadium_id)
+	if surface == null:
+		return {}
+	var local_normal: Vector3 = state.orientation.inverse() * contact.normal.normalized()
+	return {
+		"restitution": surface.restitution(local_normal.y),
+		"friction": surface.friction,
+		"rolling_resistance": surface.rolling_resistance,
+	}
