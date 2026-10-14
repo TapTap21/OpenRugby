@@ -151,6 +151,9 @@ def test_append_animation() -> None:
     assert paths.count("translation") == 1 and paths.count("rotation") == 26
     times = doc["accessors"][anim["samplers"][0]["input"]]
     assert times["count"] == 4 and times["max"] == [pytest.approx(3 / motion.FRAME_RATE)]
+    off = doc["bufferViews"][times["bufferView"]]["byteOffset"]
+    flt = struct.unpack("<4f", bytes(binary[off : off + 16]))
+    assert times["min"] == [flt[0]] and times["max"] == [flt[-1]]  # exact float32 values
     assert len(binary) == sum(v["byteLength"] for v in doc["bufferViews"])
     json.dumps(doc)
 

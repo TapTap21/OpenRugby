@@ -451,9 +451,10 @@ def _append_animation(
             "count": len(values),
             "type": atype,
         }
-        if minmax:
-            acc["min"] = [min(v[0] for v in values)]
-            acc["max"] = [max(v[0] for v in values)]
+        if minmax:  # spec: min/max must equal the stored float32 values exactly
+            stored = struct.unpack(f"<{len(flat)}f", struct.pack(f"<{len(flat)}f", *flat))
+            acc["min"] = [min(stored)]
+            acc["max"] = [max(stored)]
         doc.setdefault("accessors", []).append(acc)
         return len(doc["accessors"]) - 1
 
