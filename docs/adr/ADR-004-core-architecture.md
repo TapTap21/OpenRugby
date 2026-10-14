@@ -49,6 +49,11 @@ signal up"). The sim never touches `EventBus`; the runner relays after each tick
 mods that need to change sim behaviour use declared extension points, which the sim calls
 deterministically. Each signal documents its owning slice; adding one is a spec change.
 
+Scripts launched with Godot's `-s` entry point may not have compile-time access to autoload names.
+Scene-tree components resolve the bus at runtime from `/root/EventBus`; headless helpers use a
+passed bus when the scene tree does not install autoloads. A missing bus skips cross-feature
+emission safely instead of trying to emit on an unavailable singleton.
+
 ### 3. Match flow is a data-driven state machine
 
 Match states (`pre_match`, `kick_off`, `in_play`, `stoppage`, `half_time`, `full_time`) are

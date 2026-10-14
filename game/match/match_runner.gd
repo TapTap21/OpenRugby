@@ -90,16 +90,24 @@ func interpolation_fraction() -> float:
 
 
 func _on_sim_state_changed(from_state: StringName, to_state: StringName) -> void:
-	EventBus.match_state_changed.emit(from_state, to_state, sim.tick_count)
+	_emit_bus_signal(&"match_state_changed", [from_state, to_state, sim.tick_count])
 
 
 func _on_sim_period_started(period: int) -> void:
-	EventBus.match_period_started.emit(period)
+	_emit_bus_signal(&"match_period_started", [period])
 
 
 func _on_sim_period_ended(period: int) -> void:
-	EventBus.match_period_ended.emit(period)
+	_emit_bus_signal(&"match_period_ended", [period])
 
 
 func _on_sim_finished() -> void:
-	EventBus.match_finished.emit(sim.tick_count)
+	_emit_bus_signal(&"match_finished", [sim.tick_count])
+
+
+func _emit_bus_signal(signal_name: StringName, arguments: Array) -> void:
+	var emit_result: Error = EventBusAccess.emit(signal_name, arguments)
+	if emit_result != OK and emit_result != ERR_UNAVAILABLE:
+		push_warning(
+			"MatchRunner: could not emit %s (%s)" % [signal_name, error_string(emit_result)]
+		)

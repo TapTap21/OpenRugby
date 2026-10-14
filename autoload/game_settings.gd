@@ -12,6 +12,9 @@ const INPUT_ACTION_SET_PATH: String = "res://game/platform/input/default_action_
 ## Live input bindings, applied to [InputMap] when the autoload starts.
 var input_bindings: InputBindings
 
+## Enabled mod ids. An empty list keeps the Classic base game.
+var enabled_mods: PackedStringArray = PackedStringArray()
+
 
 func _ready() -> void:
 	var action_set: InputActionSet = load(INPUT_ACTION_SET_PATH) as InputActionSet
