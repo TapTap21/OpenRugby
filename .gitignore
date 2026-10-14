@@ -8,3 +8,19 @@
 /extracted/
 /build/
 .idea/
+
+# Tooling and build output
+*.tmp
+__pycache__/
+.venv/
+.pytest_cache/
+.ruff_cache/
+reports/
+*.translation
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.venv/
