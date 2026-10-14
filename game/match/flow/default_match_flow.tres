@@ -43,6 +43,7 @@ condition = SubResource("c_1")
 [sub_resource type="Resource" id="s_8"]
 script = ExtResource("2_state")
 id = &"kick_off"
+simulation_active = true
 transitions = Array[ExtResource("3_trans")]([SubResource("t_6"), SubResource("t_7")])
 
 [sub_resource type="Resource" id="t_9"]
@@ -63,6 +64,7 @@ condition = SubResource("c_3")
 [sub_resource type="Resource" id="s_12"]
 script = ExtResource("2_state")
 id = &"in_play"
+simulation_active = true
 clock_runs = true
 transitions = Array[ExtResource("3_trans")]([SubResource("t_9"), SubResource("t_10"), SubResource("t_11")])
 
@@ -89,6 +91,7 @@ trigger = &"restart_kick_off"
 [sub_resource type="Resource" id="s_17"]
 script = ExtResource("2_state")
 id = &"stoppage"
+simulation_active = true
 clock_runs = true
 transitions = Array[ExtResource("3_trans")]([SubResource("t_13"), SubResource("t_14"), SubResource("t_15"), SubResource("t_16")])
 

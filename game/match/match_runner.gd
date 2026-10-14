@@ -57,6 +57,19 @@ func start(
 		sim.add_system(system)
 	for system: SimSystem in typed_provided_systems:
 		sim.add_system(system)
+	sim.add_system(LocomotionSystem.new(effective_config.s2_physics.locomotion))
+	var ball_system: BallPhysicsSystem = BallPhysicsSystem.new(
+		effective_config.s2_physics.ball, effective_config.s2_physics.surfaces
+	)
+	ball_system.pitch_condition = effective_config.s2_physics.pitch_condition
+	ball_system.stadium_id = effective_config.s2_physics.stadium_id
+	ball_system.configure_extensions(extension_points, effective_config)
+	sim.add_system(ball_system)
+	var interaction_system: S2InteractionSystem = S2InteractionSystem.new(
+		effective_config.s2_physics.tackle, effective_config.s2_physics.catches
+	)
+	interaction_system.configure_extensions(extension_points)
+	sim.add_system(interaction_system)
 	var header: ReplayHeader = ReplayHeader.new()
 	var version: String = ProjectSettings.get_setting("application/config/version", "")
 	header.game_version = version

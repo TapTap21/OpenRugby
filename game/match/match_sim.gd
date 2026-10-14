@@ -112,6 +112,14 @@ func is_finished() -> bool:
 	return _finished
 
 
+## True when flow data marks the current state as simulation-active.
+func is_simulation_active() -> bool:
+	if flow == null:
+		return false
+	var state_def: MatchStateDef = flow.current_def()
+	return state_def != null and state_def.simulation_active and not _finished
+
+
 ## True while button [param bit] is held on [param slot] in the current tick.
 func is_held(slot: int, bit: int) -> bool:
 	return _current.is_held(slot, bit)

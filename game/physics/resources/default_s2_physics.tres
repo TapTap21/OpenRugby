@@ -1,0 +1,20 @@
+[gd_resource type="Resource" script_class="S2PhysicsConfig" load_steps=9 format=3]
+
+[ext_resource type="Script" path="res://game/physics/resources/s2_physics_config.gd" id="1"]
+[ext_resource type="Resource" path="res://game/physics/resources/default_ball_physics.tres" id="2"]
+[ext_resource type="Resource" path="res://game/physics/resources/default_locomotion.tres" id="3"]
+[ext_resource type="Resource" path="res://game/physics/resources/default_tackle.tres" id="4"]
+[ext_resource type="Resource" path="res://game/physics/resources/default_kicks.tres" id="5"]
+[ext_resource type="Resource" path="res://game/physics/resources/default_passes.tres" id="6"]
+[ext_resource type="Resource" path="res://game/physics/resources/default_catches.tres" id="7"]
+[ext_resource type="Resource" path="res://game/physics/resources/default_pitch_surfaces.tres" id="8"]
+
+[resource]
+script = ExtResource("1")
+ball = ExtResource("2")
+locomotion = ExtResource("3")
+tackle = ExtResource("4")
+kicks = ExtResource("5")
+passes = ExtResource("6")
+catches = ExtResource("7")
+surfaces = ExtResource("8")

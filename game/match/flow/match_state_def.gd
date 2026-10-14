@@ -5,6 +5,8 @@ extends Resource
 @export var id: StringName
 ## True when the match clock advances in this state.
 @export var clock_runs: bool = false
+## True while the S2 solver may advance when its ball mode is free.
+@export var simulation_active: bool = false
 ## True when entering this state ends the current period.
 @export var ends_period: bool = false
 ## True when entering this state finishes the match.

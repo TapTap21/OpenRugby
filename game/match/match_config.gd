@@ -10,6 +10,7 @@ extends Resource
 @export var away_team: Team
 @export var stadium: Stadium
 @export var difficulty: DifficultyProfile
+@export var s2_physics: S2PhysicsConfig
 ## Real seconds per period (PROVISIONAL, the match-length option).
 @export var period_real_seconds: int = 300
 @export var slot_count: int = 1
@@ -29,6 +30,7 @@ static func create_default() -> MatchConfig:
 	config.rules = rules_res.duplicate(true) as RulesConfig
 	config.flow = flow_res.duplicate(true) as MatchFlowConfig
 	config.pitch = pitch_res.duplicate(true) as PitchGeometry
+	config.s2_physics = S2PhysicsConfig.create_classic()
 	return config
 
 
@@ -47,6 +49,10 @@ func validate() -> PackedStringArray:
 		errors += PackedStringArray(["pitch is null"])
 	else:
 		errors.append_array(pitch.validate())
+	if s2_physics == null:
+		errors += PackedStringArray(["s2_physics is null"])
+	else:
+		errors.append_array(s2_physics.validate())
 	if period_real_seconds < 1:
 		errors += PackedStringArray(["period_real_seconds must be at least 1"])
 	if slot_count < 1 or slot_count > 8:

@@ -1,0 +1,127 @@
+[gd_resource type="Resource" script_class="KickParams" load_steps=15 format=3]
+
+[ext_resource type="Script" path="res://game/physics/resources/kick_params.gd" id="1"]
+[ext_resource type="Script" path="res://game/physics/resources/kick_profile.gd" id="2"]
+
+[sub_resource type="Resource" id="KickProfile_1"]
+script = ExtResource("2")
+type_id = 1
+speed_low_m_s = 16.081
+speed_high_m_s = 22.304
+elevation_low_degrees = 42.316
+elevation_high_degrees = 42.5
+power_rating_applies = true
+
+[sub_resource type="Resource" id="KickProfile_2"]
+script = ExtResource("2")
+type_id = 2
+speed_low_m_s = 14.5
+speed_high_m_s = 22.175
+elevation_low_degrees = 68.478
+elevation_high_degrees = 76.064
+power_rating_applies = true
+
+[sub_resource type="Resource" id="KickProfile_3"]
+script = ExtResource("2")
+type_id = 3
+speed_low_m_s = 9.79
+speed_high_m_s = 16.0
+elevation_low_degrees = 2.019
+elevation_high_degrees = 10.8
+power_rating_applies = false
+
+[sub_resource type="Resource" id="KickProfile_4"]
+script = ExtResource("2")
+type_id = 4
+speed_low_m_s = 10
+speed_high_m_s = 33
+elevation_low_degrees = 30
+elevation_high_degrees = 60
+power_rating_applies = true
+
+[sub_resource type="Resource" id="KickProfile_5"]
+script = ExtResource("2")
+type_id = 5
+speed_low_m_s = 10
+speed_high_m_s = 33
+elevation_low_degrees = 30
+elevation_high_degrees = 60
+power_rating_applies = true
+
+[sub_resource type="Resource" id="KickProfile_6"]
+script = ExtResource("2")
+type_id = 6
+speed_low_m_s = 12.2
+speed_high_m_s = 12.2
+elevation_low_degrees = 10
+elevation_high_degrees = 10
+power_rating_applies = false
+
+[sub_resource type="Resource" id="KickProfile_7"]
+script = ExtResource("2")
+type_id = 7
+speed_low_m_s = 10
+speed_high_m_s = 20
+elevation_low_degrees = 40
+elevation_high_degrees = 80
+power_rating_applies = false
+
+[sub_resource type="Resource" id="KickProfile_8"]
+script = ExtResource("2")
+type_id = 8
+speed_low_m_s = 12.998
+speed_high_m_s = 21
+elevation_low_degrees = 45
+elevation_high_degrees = 50.87
+power_rating_applies = true
+
+[sub_resource type="Resource" id="KickProfile_9"]
+script = ExtResource("2")
+type_id = 9
+speed_low_m_s = 13
+speed_high_m_s = 20.1
+elevation_low_degrees = 50.416
+elevation_high_degrees = 50.489
+power_rating_applies = true
+
+[sub_resource type="Resource" id="KickProfile_10"]
+script = ExtResource("2")
+type_id = 10
+speed_low_m_s = 10
+speed_high_m_s = 20
+elevation_low_degrees = 40
+elevation_high_degrees = 80
+power_rating_applies = false
+
+[sub_resource type="Resource" id="KickProfile_11"]
+script = ExtResource("2")
+type_id = 11
+speed_low_m_s = 10
+speed_high_m_s = 20
+elevation_low_degrees = 40
+elevation_high_degrees = 80
+power_rating_applies = false
+
+[sub_resource type="Resource" id="KickProfile_12"]
+script = ExtResource("2")
+type_id = 12
+speed_low_m_s = 10
+speed_high_m_s = 20
+elevation_low_degrees = 40
+elevation_high_degrees = 80
+power_rating_applies = false
+
+[resource]
+script = ExtResource("1")
+profiles = Array[ExtResource("2")]([SubResource("KickProfile_1"),
+SubResource("KickProfile_2"),
+SubResource("KickProfile_3"),
+SubResource("KickProfile_4"),
+SubResource("KickProfile_5"),
+SubResource("KickProfile_6"),
+SubResource("KickProfile_7"),
+SubResource("KickProfile_8"),
+SubResource("KickProfile_9"),
+SubResource("KickProfile_10"),
+SubResource("KickProfile_11"),
+SubResource("KickProfile_12")])

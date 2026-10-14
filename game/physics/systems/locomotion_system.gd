@@ -1,0 +1,159 @@
+class_name LocomotionSystem
+extends SimSystem
+## S2 60 Hz locomotion and sprint-energy updates from injected player/match data.
+
+const MATCH_DT: float = 1.0 / 60.0
+
+var params: LocomotionParams
+var players: Array[PlayerMotionState] = []
+var pitch_condition: int = -1
+var fatigue_option: int = -1
+var unresolved_inputs: PackedStringArray = []
+
+
+func _init(p_params: LocomotionParams = null) -> void:
+	params = p_params
+
+
+func system_id() -> StringName:
+	return &"s2_locomotion"
+
+
+## Updates players in stable team/shirt/player-id order, only with valid injected snapshots.
+func tick(sim: MatchSim) -> void:
+	unresolved_inputs.clear()
+	if not sim.is_simulation_active():
+		return
+	if params == null or not params.validate().is_empty():
+		unresolved_inputs += PackedStringArray(["locomotion parameters missing or invalid"])
+		return
+	if pitch_condition < 0 or pitch_condition > 5 or fatigue_option < 0 or fatigue_option > 100:
+		unresolved_inputs += PackedStringArray(["pitch condition or fatigue option is unresolved"])
+		return
+	var fatigue_multiplier: float = params.fatigue_multiplier(fatigue_option)
+	players.sort_custom(_player_less)
+	var seen_player_ids: Dictionary[StringName, bool] = {}
+	for player: PlayerMotionState in players:
+		if player.player_id == &"" or seen_player_ids.has(player.player_id):
+			unresolved_inputs += PackedStringArray(
+				["locomotion player ids must be nonempty and unique"]
+			)
+			continue
+		seen_player_ids[player.player_id] = true
+		if not player.initialized or player.sprint_request < 0 or player.sprint_request > 1:
+			unresolved_inputs += PackedStringArray(
+				["missing initial motion/sprint request for %s" % player.player_id]
+			)
+			continue
+		if player.fatigue_snapshot == null or not player.fatigue_snapshot.is_valid():
+			unresolved_inputs += PackedStringArray(
+				["missing valid pre-advance fatigue snapshot for %s" % player.player_id]
+			)
+			continue
+		if not player.sprint_energy_initialized:
+			player.sprint_energy = player.fatigue_snapshot.initial_sprint_energy
+			player.sprint_energy_initialized = true
+		if (
+			not is_finite(player.speed_stat)
+			or not is_finite(player.acceleration_stat)
+			or not is_finite(player.urgency)
+		):
+			unresolved_inputs += PackedStringArray(
+				["missing locomotion stats or urgency for %s" % player.player_id]
+			)
+			continue
+		player.run_speed_m_s = params.run_speed(player.speed_stat)
+		player.sprint_speed_m_s = params.sprint_speed(player.speed_stat)
+		var sprint_allowed: bool = can_sprint(player.sprint_energy, player.sprinting)
+		var accel_factor: float = (
+			1.0
+			- clampf(player.acceleration_stat, params.attribute_min, params.attribute_max) / 100.0
+		)
+		player.sprinting = (
+			player.sprint_request == 1 and sprint_allowed and accel_factor < player.urgency
+		)
+		player.desired_speed_m_s = (
+			player.sprint_speed_m_s if player.sprinting else player.run_speed_m_s
+		)
+		var below_run_speed: bool = player.speed_m_s < player.run_speed_m_s
+		var accel_time: float = params.run_accel_time_s
+		var speed_delta: float = player.run_speed_m_s
+		if not below_run_speed and player.sprinting:
+			accel_time = params.acceleration_time(player.acceleration_stat)
+			speed_delta = player.sprint_speed_m_s - player.run_speed_m_s
+		var instant_acceleration: bool = (
+			player.sprinting
+			and not below_run_speed
+			and accel_time < params.instant_acceleration_time_threshold_s
+		)
+		var speed_rate: float = speed_delta if instant_acceleration else speed_delta / accel_time
+		player.acceleration_increment_m_s_per_tick = speed_rate * MATCH_DT
+		if instant_acceleration:
+			player.speed_m_s = player.desired_speed_m_s
+		else:
+			player.speed_m_s = move_toward(
+				player.speed_m_s,
+				player.desired_speed_m_s,
+				player.acceleration_increment_m_s_per_tick
+			)
+		var energy_rate: float = params.energy_rate(
+			player.speed_m_s, player.run_speed_m_s, pitch_condition, fatigue_multiplier
+		)
+		player.sprint_energy = clampf(
+			player.sprint_energy + energy_rate * MATCH_DT,
+			params.energy_minimum,
+			player.fatigue_snapshot.energy_cap
+		)
+		player.stagger_timer_s = maxf(0.0, player.stagger_timer_s - MATCH_DT)
+
+
+func snapshot() -> Dictionary:
+	var player_data: Array[Dictionary] = []
+	for player: PlayerMotionState in players:
+		player_data += [player.snapshot()]
+	return {
+		"params": _resource_snapshot(params),
+		"pitch_condition": pitch_condition,
+		"fatigue_option": fatigue_option,
+		"players": player_data,
+		"unresolved_inputs": Array(unresolved_inputs),
+	}
+
+
+## Returns whether an energy level may begin or continue sprinting.
+func can_sprint(energy: float, already_sprinting: bool) -> bool:
+	if params == null:
+		return false
+	return (
+		energy > params.sprint_continue_energy_strict
+		if already_sprinting
+		else energy > params.sprint_start_energy_strict
+	)
+
+
+func _player_less(left: PlayerMotionState, right: PlayerMotionState) -> bool:
+	if left.team_id != right.team_id:
+		return String(left.team_id) < String(right.team_id)
+	if left.shirt_number != right.shirt_number:
+		return left.shirt_number < right.shirt_number
+	return String(left.player_id) < String(right.player_id)
+
+
+func _property_name(property: Dictionary) -> String:
+	@warning_ignore("unsafe_cast")
+	var name_value: StringName = property["name"]
+	return String(name_value)
+
+
+func _resource_snapshot(resource: Resource) -> Dictionary:
+	var result: Dictionary = {}
+	if resource == null:
+		return result
+	var names: Array[String] = []
+	for property: Dictionary in resource.get_property_list():
+		if property.usage & PROPERTY_USAGE_SCRIPT_VARIABLE:
+			names += [_property_name(property)]
+	names.sort()
+	for property_name: String in names:
+		result[property_name] = resource.get(property_name)
+	return result
