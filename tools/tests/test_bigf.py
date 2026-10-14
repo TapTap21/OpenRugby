@@ -6,8 +6,8 @@ import struct
 from pathlib import Path
 
 import pytest
-from openrugby_tools import bigf, cli
 
+from openrugby_tools import bigf, cli
 from tests.test_refpack import literal_stream
 
 
@@ -79,7 +79,9 @@ def test_extract(archive: Path, tmp_path: Path) -> None:
     assert (out / "packed.dat.unpacked").read_bytes() == bytes(range(250)) * 2
 
 
-def test_cli_list_and_inventory(archive: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_cli_list_and_inventory(
+    archive: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     assert cli.main(["list", str(archive)]) == 0
     assert "packed.dat" in capsys.readouterr().out
     inv = tmp_path / "inv"
@@ -101,3 +103,35 @@ def test_real_moai() -> None:
         assert len(a.entries) == 537
         assert min(e.offset for e in a.entries) == a.index_end + 1
         assert max(e.offset + e.size for e in a.entries) <= a.file_size
+
+
+def test_extract_file_dir_and_unpacked_collisions(tmp_path: Path) -> None:
+    packed = literal_stream(b"abcd")
+    members = [
+        ("foo", b"file"),
+        ("foo/bar", b"nested"),  # parent is already a file
+        ("baz/qux", b"q"),
+        ("baz", b"after"),  # name already used as a directory
+        ("p.dat", packed),
+        ("p.dat.unpacked", b"mine"),  # would clobber the decoded sibling
+    ]
+    arc = tmp_path / "c.big"
+    arc.write_bytes(build_big(members))
+    out = tmp_path / "out"
+    with bigf.BigfArchive(arc) as a:
+        man = bigf.extract_all(a, out)
+    assert len({m["path"] for m in man}) == len(man)
+    by = {m["name"]: (out / str(m["path"])).read_bytes() for m in man}
+    assert by["foo"] == b"file" and by["foo/bar"] == b"nested"
+    assert by["baz"] == b"after" and by["p.dat.unpacked"] == b"mine"
+    assert (out / "p.dat.unpacked").read_bytes() == b"abcd"
+
+
+def test_cli_reports_errors_without_traceback(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert cli.main(["list", str(tmp_path / "missing.big")]) == 1
+    bad = tmp_path / "bad.big"
+    bad.write_bytes(b"NOPE" + b"\0" * 32)
+    assert cli.main(["extract", str(bad), "-o", str(tmp_path / "o")]) == 1
+    assert "error:" in capsys.readouterr().err

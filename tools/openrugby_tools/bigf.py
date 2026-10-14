@@ -68,7 +68,7 @@ class BigfArchive:
         if count > 5_000_000:
             raise BigfError(f"implausible entry count {count}")
         # Read the index in a buffer large enough for header_size, grow if needed.
-        want = max(self.header_size, 16) + 4096
+        want = min(max(self.header_size, 16), 1 << 24) + 4096
         fh.seek(0)
         buf = fh.read(min(want, self.file_size))
         pos = 16
@@ -112,15 +112,35 @@ class BigfArchive:
 
 
 def safe_relpath(name: str, used: set[str]) -> PurePosixPath:
-    """Map a member name to a safe, unique relative path (no escapes)."""
+    """Map a member name to a safe, unique relative path (no escapes).
+
+    ``used`` tracks lower-cased file paths plus NUL-d-prefixed directories so a
+    member can never need a directory that an earlier member took as a file (or
+    vice versa); such names are flattened with ``_`` instead.
+    """
     parts = [p for p in name.replace("\\", "/").split("/") if p not in ("", ".", "..")]
-    parts = [p.replace(":", "_") for p in parts] or ["_unnamed"]
+    parts = [p.replace(":", "_")[:200] for p in parts] or ["_unnamed"]
+
+    def clash(r: PurePosixPath) -> bool:
+        low = r.as_posix().lower()
+        if low in used or "\0d:" + low in used:
+            return True
+        return any(a.as_posix().lower() in used for a in list(r.parents)[:-1])
+
     rel = PurePosixPath(*parts)
+    if len(parts) > 1 and any(
+        PurePosixPath(*parts[:k]).as_posix().lower() in used for k in range(1, len(parts))
+    ):
+        rel = PurePosixPath("_".join(parts)[:200])
     cand, n = rel, 1
-    while cand.as_posix().lower() in used:
+    while clash(cand):
         n += 1
         cand = rel.with_name(f"{rel.stem}~{n}{rel.suffix}")
     used.add(cand.as_posix().lower())
+    # Reserve the sibling the extractor writes for decoded RefPack payloads.
+    used.add(cand.as_posix().lower() + ".unpacked")
+    for a in list(cand.parents)[:-1]:
+        used.add("\0d:" + a.as_posix().lower())
     return cand
 
 

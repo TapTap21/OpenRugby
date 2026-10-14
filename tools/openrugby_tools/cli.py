@@ -10,7 +10,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 from . import refpack
-from .bigf import BigfArchive, extract_all
+from .bigf import BigfArchive, BigfError, extract_all
 
 REPO = Path(__file__).resolve().parents[2]
 DEFAULT_EXTRACT_ROOT = REPO / "extracted"
@@ -37,11 +37,24 @@ MAGIC_HINTS: dict[str, str] = {
     "MZ": "Windows executable/DLL",
 }
 EXT_HINTS: dict[str, str] = {
-    ".fsh": "texture", ".tga": "texture", ".dds": "texture", ".png": "texture",
-    ".ttf": "font", ".fnt": "font", ".asf": "audio", ".mus": "audio", ".snr": "audio",
-    ".lua": "script", ".txt": "text", ".csv": "text", ".xml": "text/data",
-    ".str": "text/locale", ".dat": "data (unknown)", ".db": "database",
-    ".swf": "UI/flash", ".vp6": "video",
+    ".fsh": "texture",
+    ".tga": "texture",
+    ".dds": "texture",
+    ".png": "texture",
+    ".ttf": "font",
+    ".fnt": "font",
+    ".asf": "audio",
+    ".mus": "audio",
+    ".snr": "audio",
+    ".lua": "script",
+    ".txt": "text",
+    ".csv": "text",
+    ".xml": "text/data",
+    ".str": "text/locale",
+    ".dat": "data (unknown)",
+    ".db": "database",
+    ".swf": "UI/flash",
+    ".vp6": "video",
 }
 
 
@@ -120,8 +133,10 @@ def cmd_extract(a: argparse.Namespace) -> int:
     (out / "manifest.json").write_text(json.dumps(man, indent=1))
     errs = sum(1 for m in man if "refpack_error" in m)
     rp = sum(1 for m in man if m["refpack"])
-    print(f"{src.name}: {len(man)} members -> {out} (refpack ok={rp}, errors={errs}) "
-          f"in {time.time() - t0:.1f}s")
+    print(
+        f"{src.name}: {len(man)} members -> {out} (refpack ok={rp}, errors={errs}) "
+        f"in {time.time() - t0:.1f}s"
+    )
     return 0
 
 
@@ -161,12 +176,19 @@ def cmd_report(a: argparse.Namespace) -> int:
             m["raw_magic"] = m["magic"]
             if m.get("refpack_ok"):
                 m["magic"] = "RP>" + m["inner_magic"]
-        L += [f"## {inv['archive']}", "",
-              f"- members: {inv['member_count']}",
-              (f"- file size: {_human(inv['file_size'])}; member bytes total: "
-               f"{_human(sum(m['size'] for m in ms))}"),
-              (f"- header size field {inv['header_size_field']}, index end "
-               f"{inv['index_end']}, trailer tag {inv['trailer']!r}")]
+        L += [
+            f"## {inv['archive']}",
+            "",
+            f"- members: {inv['member_count']}",
+            (
+                f"- file size: {_human(inv['file_size'])}; member bytes total: "
+                f"{_human(sum(m['size'] for m in ms))}"
+            ),
+            (
+                f"- header size field {inv['header_size_field']}, index end "
+                f"{inv['index_end']}, trailer tag {inv['trailer']!r}"
+            ),
+        ]
         rp = [m for m in ms if m["refpack_sig"]]
         ok = sum(1 for m in rp if m.get("refpack_ok"))
         L.append(
@@ -178,13 +200,23 @@ def cmd_report(a: argparse.Namespace) -> int:
         for m in ms:
             parts = m["name"].replace("\\", "/").split("/")
             pref["/".join(parts[:-1][:2]) or "(root)"] += 1
-        L += ["- directory-like prefixes: " + (", ".join(f"`{k}` ({v})" for k, v in pref.most_common(15))), ""]
+        L += [
+            "- directory-like prefixes: "
+            + (", ".join(f"`{k}` ({v})" for k, v in pref.most_common(15))),
+            "",
+        ]
         ext = Counter(m["ext"] for m in ms)
         mag = Counter(m["magic"] for m in ms)
         L += ["Extension histogram:", "", "| ext | count | bytes |", "|---|---|---|"]
         for k, v in ext.most_common(25):
             L.append(f"| `{k}` | {v} | {sum(m['size'] for m in ms if m['ext'] == k)} |")
-        L += ["", "First-4-bytes histogram:", "", "| magic | count | hint | examples |", "|---|---|---|---|"]
+        L += [
+            "",
+            "First-4-bytes histogram:",
+            "",
+            "| magic | count | hint | examples |",
+            "|---|---|---|---|",
+        ]
         for k, v in mag.most_common(25):
             ex = [m["name"] for m in ms if m["magic"] == k][:10]
             L.append(f"| `{k}` | {v} | {_hint(k, '') or 'unknown'} | {'; '.join(ex[:10])} |")
@@ -200,9 +232,15 @@ def cmd_report(a: argparse.Namespace) -> int:
         L.append("")
     L += ["## Combined top magics", "", "| magic | count |", "|---|---|"]
     L += [f"| `{k}` | {v} |" for k, v in total_magic.most_common(15)]
-    L += ["", "## Candidate formats to reverse", "",
-          "Magics with no known hint (unknown until proven). Count, archive(s), example member.", "",
-          "| magic | count | archives | example | size |", "|---|---|---|---|---|"]
+    L += [
+        "",
+        "## Candidate formats to reverse",
+        "",
+        "Magics with no known hint (unknown until proven). Count, archive(s), example member.",
+        "",
+        "| magic | count | archives | example | size |",
+        "|---|---|---|---|---|",
+    ]
     for k, v in sorted(unk.items(), key=lambda kv: -len(kv[1]))[:60]:
         arcs = sorted({x["archive"] for x in v})
         L.append(f"| `{k}` | {len(v)} | {', '.join(arcs)} | {v[0]['name']} | {v[0]['size']} |")
@@ -228,7 +266,9 @@ def main(argv: list[str] | None = None) -> int:
     p.set_defaults(fn=cmd_list)
     p = sub.add_parser("extract", help="extract members + manifest.json")
     p.add_argument("archive")
-    p.add_argument("-o", "--out", help=f"output dir (default {DEFAULT_EXTRACT_ROOT}/<archive-name>)")
+    p.add_argument(
+        "-o", "--out", help=f"output dir (default {DEFAULT_EXTRACT_ROOT}/<archive-name>)"
+    )
     p.add_argument("--no-refpack", action="store_true", help="skip RefPack decoding")
     p.set_defaults(fn=cmd_extract)
     p = sub.add_parser("inventory", help="write member inventory JSON per archive")
@@ -240,7 +280,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("-o", "--out")
     p.set_defaults(fn=cmd_report)
     a = ap.parse_args(argv)
-    return int(a.fn(a))
+    try:
+        return int(a.fn(a))
+    except (BigfError, OSError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":
