@@ -523,6 +523,16 @@ placeholder capsules and a flat pitch. Visual milestone: after S7.
 
 ---
 
+## 4b. Token and cost tracking
+
+`tools/ops/token_ledger.py` reads this project's Claude Code transcripts and
+writes `.omc/ledger/REPORT.md` (gitignored): tokens and API list-price cost by
+model and effort, by phase, by agent and by session. The orchestrator reruns
+it after every milestone and reports the running total. Every spawned agent
+gets a phase-prefixed name (`p1-rules-lead`, `s3-impl`) so the ledger groups
+it automatically. Input and cache counts are exact; output for unfinished
+requests is estimated, so totals are a lower bound.
+
 ## 5. What happens on "go"
 
 1. Orchestrator: install Godot/gdtoolkit, scaffold repo, commit Phase 0.
