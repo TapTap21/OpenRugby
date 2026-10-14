@@ -1,0 +1,330 @@
+[gd_resource type="Resource" script_class="InputActionSet" load_steps=56 format=3]
+
+[ext_resource type="Script" path="res://game/platform/input/input_action_set.gd" id="1_set"]
+[ext_resource type="Script" path="res://game/platform/input/input_action_def.gd" id="2_action"]
+[ext_resource type="Script" path="res://game/platform/input/input_axis_def.gd" id="3_axis"]
+
+[sub_resource type="InputEventJoypadMotion" id="ev1"]
+device = -1
+axis = 1
+axis_value = -1.0
+
+[sub_resource type="InputEventKey" id="ev2"]
+device = -1
+physical_keycode = 87
+
+[sub_resource type="InputEventKey" id="ev3"]
+device = -1
+physical_keycode = 4194320
+
+[sub_resource type="Resource" id="act_move_up"]
+script = ExtResource("2_action")
+id = &"move_up"
+context = 0
+display_name_key = "INPUT_ACTION_MOVE_UP"
+deadzone = 0.2
+gamepad_events = Array[InputEvent]([SubResource("ev1")])
+keyboard_events = Array[InputEvent]([SubResource("ev2"), SubResource("ev3")])
+provisional = true
+
+[sub_resource type="InputEventJoypadMotion" id="ev4"]
+device = -1
+axis = 1
+axis_value = 1.0
+
+[sub_resource type="InputEventKey" id="ev5"]
+device = -1
+physical_keycode = 83
+
+[sub_resource type="InputEventKey" id="ev6"]
+device = -1
+physical_keycode = 4194322
+
+[sub_resource type="Resource" id="act_move_down"]
+script = ExtResource("2_action")
+id = &"move_down"
+context = 0
+display_name_key = "INPUT_ACTION_MOVE_DOWN"
+deadzone = 0.2
+gamepad_events = Array[InputEvent]([SubResource("ev4")])
+keyboard_events = Array[InputEvent]([SubResource("ev5"), SubResource("ev6")])
+provisional = true
+
+[sub_resource type="InputEventJoypadMotion" id="ev7"]
+device = -1
+axis = 0
+axis_value = -1.0
+
+[sub_resource type="InputEventKey" id="ev8"]
+device = -1
+physical_keycode = 65
+
+[sub_resource type="InputEventKey" id="ev9"]
+device = -1
+physical_keycode = 4194319
+
+[sub_resource type="Resource" id="act_move_left"]
+script = ExtResource("2_action")
+id = &"move_left"
+context = 0
+display_name_key = "INPUT_ACTION_MOVE_LEFT"
+deadzone = 0.2
+gamepad_events = Array[InputEvent]([SubResource("ev7")])
+keyboard_events = Array[InputEvent]([SubResource("ev8"), SubResource("ev9")])
+provisional = true
+
+[sub_resource type="InputEventJoypadMotion" id="ev10"]
+device = -1
+axis = 0
+axis_value = 1.0
+
+[sub_resource type="InputEventKey" id="ev11"]
+device = -1
+physical_keycode = 68
+
+[sub_resource type="InputEventKey" id="ev12"]
+device = -1
+physical_keycode = 4194321
+
+[sub_resource type="Resource" id="act_move_right"]
+script = ExtResource("2_action")
+id = &"move_right"
+context = 0
+display_name_key = "INPUT_ACTION_MOVE_RIGHT"
+deadzone = 0.2
+gamepad_events = Array[InputEvent]([SubResource("ev10")])
+keyboard_events = Array[InputEvent]([SubResource("ev11"), SubResource("ev12")])
+provisional = true
+
+[sub_resource type="InputEventJoypadMotion" id="ev13"]
+device = -1
+axis = 5
+axis_value = 1.0
+
+[sub_resource type="InputEventKey" id="ev14"]
+device = -1
+physical_keycode = 4194325
+
+[sub_resource type="Resource" id="act_sprint"]
+script = ExtResource("2_action")
+id = &"sprint"
+context = 0
+display_name_key = "INPUT_ACTION_SPRINT"
+deadzone = 0.2
+gamepad_events = Array[InputEvent]([SubResource("ev13")])
+keyboard_events = Array[InputEvent]([SubResource("ev14")])
+provisional = true
+
+[sub_resource type="InputEventJoypadButton" id="ev15"]
+device = -1
+button_index = 9
+
+[sub_resource type="InputEventKey" id="ev16"]
+device = -1
+physical_keycode = 81
+
+[sub_resource type="Resource" id="act_pass_left"]
+script = ExtResource("2_action")
+id = &"pass_left"
+context = 0
+display_name_key = "INPUT_ACTION_PASS_LEFT"
+deadzone = 0.2
+gamepad_events = Array[InputEvent]([SubResource("ev15")])
+keyboard_events = Array[InputEvent]([SubResource("ev16")])
+provisional = true
+
+[sub_resource type="InputEventJoypadButton" id="ev17"]
+device = -1
+button_index = 10
+
+[sub_resource type="InputEventKey" id="ev18"]
+device = -1
+physical_keycode = 69
+
+[sub_resource type="Resource" id="act_pass_right"]
+script = ExtResource("2_action")
+id = &"pass_right"
+context = 0
+display_name_key = "INPUT_ACTION_PASS_RIGHT"
+deadzone = 0.2
+gamepad_events = Array[InputEvent]([SubResource("ev17")])
+keyboard_events = Array[InputEvent]([SubResource("ev18")])
+provisional = true
+
+[sub_resource type="InputEventJoypadButton" id="ev19"]
+device = -1
+button_index = 3
+
+[sub_resource type="InputEventKey" id="ev20"]
+device = -1
+physical_keycode = 75
+
+[sub_resource type="Resource" id="act_kick"]
+script = ExtResource("2_action")
+id = &"kick"
+context = 0
+display_name_key = "INPUT_ACTION_KICK"
+deadzone = 0.2
+gamepad_events = Array[InputEvent]([SubResource("ev19")])
+keyboard_events = Array[InputEvent]([SubResource("ev20")])
+provisional = true
+
+[sub_resource type="InputEventJoypadButton" id="ev21"]
+device = -1
+button_index = 2
+
+[sub_resource type="InputEventKey" id="ev22"]
+device = -1
+physical_keycode = 74
+
+[sub_resource type="Resource" id="act_tackle"]
+script = ExtResource("2_action")
+id = &"tackle"
+context = 0
+display_name_key = "INPUT_ACTION_TACKLE"
+deadzone = 0.2
+gamepad_events = Array[InputEvent]([SubResource("ev21")])
+keyboard_events = Array[InputEvent]([SubResource("ev22")])
+provisional = true
+
+[sub_resource type="InputEventJoypadButton" id="ev23"]
+device = -1
+button_index = 0
+
+[sub_resource type="InputEventKey" id="ev24"]
+device = -1
+physical_keycode = 76
+
+[sub_resource type="Resource" id="act_switch_player"]
+script = ExtResource("2_action")
+id = &"switch_player"
+context = 0
+display_name_key = "INPUT_ACTION_SWITCH_PLAYER"
+deadzone = 0.2
+gamepad_events = Array[InputEvent]([SubResource("ev23")])
+keyboard_events = Array[InputEvent]([SubResource("ev24")])
+provisional = true
+
+[sub_resource type="InputEventJoypadButton" id="ev25"]
+device = -1
+button_index = 6
+
+[sub_resource type="InputEventKey" id="ev26"]
+device = -1
+physical_keycode = 4194305
+
+[sub_resource type="Resource" id="act_pause"]
+script = ExtResource("2_action")
+id = &"pause"
+context = 2
+display_name_key = "INPUT_ACTION_PAUSE"
+deadzone = 0.2
+gamepad_events = Array[InputEvent]([SubResource("ev25")])
+keyboard_events = Array[InputEvent]([SubResource("ev26")])
+provisional = true
+
+[sub_resource type="InputEventKey" id="ev27"]
+device = -1
+physical_keycode = 4194309
+
+[sub_resource type="InputEventKey" id="ev28"]
+device = -1
+physical_keycode = 32
+
+[sub_resource type="Resource" id="act_ui_accept"]
+script = ExtResource("2_action")
+id = &"ui_accept"
+context = 1
+display_name_key = "INPUT_ACTION_UI_ACCEPT"
+deadzone = 0.2
+gamepad_events = Array[InputEvent]([SubResource("ev23")])
+keyboard_events = Array[InputEvent]([SubResource("ev27"), SubResource("ev28")])
+provisional = true
+
+[sub_resource type="InputEventJoypadButton" id="ev29"]
+device = -1
+button_index = 1
+
+[sub_resource type="InputEventKey" id="ev30"]
+device = -1
+physical_keycode = 4194308
+
+[sub_resource type="Resource" id="act_ui_cancel"]
+script = ExtResource("2_action")
+id = &"ui_cancel"
+context = 1
+display_name_key = "INPUT_ACTION_UI_CANCEL"
+deadzone = 0.2
+gamepad_events = Array[InputEvent]([SubResource("ev29")])
+keyboard_events = Array[InputEvent]([SubResource("ev26"), SubResource("ev30")])
+provisional = true
+
+[sub_resource type="InputEventJoypadButton" id="ev31"]
+device = -1
+button_index = 11
+
+[sub_resource type="Resource" id="act_ui_up"]
+script = ExtResource("2_action")
+id = &"ui_up"
+context = 1
+display_name_key = "INPUT_ACTION_UI_UP"
+deadzone = 0.2
+gamepad_events = Array[InputEvent]([SubResource("ev31")])
+keyboard_events = Array[InputEvent]([SubResource("ev3")])
+provisional = true
+
+[sub_resource type="InputEventJoypadButton" id="ev32"]
+device = -1
+button_index = 12
+
+[sub_resource type="Resource" id="act_ui_down"]
+script = ExtResource("2_action")
+id = &"ui_down"
+context = 1
+display_name_key = "INPUT_ACTION_UI_DOWN"
+deadzone = 0.2
+gamepad_events = Array[InputEvent]([SubResource("ev32")])
+keyboard_events = Array[InputEvent]([SubResource("ev6")])
+provisional = true
+
+[sub_resource type="InputEventJoypadButton" id="ev33"]
+device = -1
+button_index = 13
+
+[sub_resource type="Resource" id="act_ui_left"]
+script = ExtResource("2_action")
+id = &"ui_left"
+context = 1
+display_name_key = "INPUT_ACTION_UI_LEFT"
+deadzone = 0.2
+gamepad_events = Array[InputEvent]([SubResource("ev33")])
+keyboard_events = Array[InputEvent]([SubResource("ev9")])
+provisional = true
+
+[sub_resource type="InputEventJoypadButton" id="ev34"]
+device = -1
+button_index = 14
+
+[sub_resource type="Resource" id="act_ui_right"]
+script = ExtResource("2_action")
+id = &"ui_right"
+context = 1
+display_name_key = "INPUT_ACTION_UI_RIGHT"
+deadzone = 0.2
+gamepad_events = Array[InputEvent]([SubResource("ev34")])
+keyboard_events = Array[InputEvent]([SubResource("ev12")])
+provisional = true
+
+[sub_resource type="Resource" id="axis_move"]
+script = ExtResource("3_axis")
+id = &"move"
+negative_x = &"move_left"
+positive_x = &"move_right"
+negative_y = &"move_up"
+positive_y = &"move_down"
+
+[resource]
+script = ExtResource("1_set")
+id = &"default"
+actions = Array[InputActionDef]([SubResource("act_move_up"), SubResource("act_move_down"), SubResource("act_move_left"), SubResource("act_move_right"), SubResource("act_sprint"), SubResource("act_pass_left"), SubResource("act_pass_right"), SubResource("act_kick"), SubResource("act_tackle"), SubResource("act_switch_player"), SubResource("act_pause"), SubResource("act_ui_accept"), SubResource("act_ui_cancel"), SubResource("act_ui_up"), SubResource("act_ui_down"), SubResource("act_ui_left"), SubResource("act_ui_right")])
+axes = Array[InputAxisDef]([SubResource("axis_move")])
