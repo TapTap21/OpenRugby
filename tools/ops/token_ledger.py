@@ -17,7 +17,6 @@ import argparse
 import collections
 import glob
 import json
-import os
 import pathlib
 from dataclasses import dataclass, field
 
@@ -45,7 +44,7 @@ class Usage:
 	output: int = 0
 	cost: float = 0.0
 
-	def add(self, other: "Usage") -> None:
+	def add(self, other: Usage) -> None:
 		for f in ("requests", "input", "cache_write_5m", "cache_write_1h", "cache_read", "output", "cost"):
 			setattr(self, f, getattr(self, f) + getattr(other, f))
 
@@ -217,13 +216,13 @@ def main() -> None:
 	parts = [
 		"# OpenRugby token and cost ledger",
 		"",
-		f"Costs are API list-price equivalents. Requests: {total.requests}. "
-		f"Tokens: {fmt_tokens(total.total_tokens)}. **Total: ${total.cost:,.2f}**",
+		(f"Costs are API list-price equivalents. Requests: {total.requests}. "
+		f"Tokens: {fmt_tokens(total.total_tokens)}. **Total: ${total.cost:,.2f}**"),
 		"",
-		f"Accuracy: input and cache tokens are exact. Output is exact for "
+		(f"Accuracy: input and cache tokens are exact. Output is exact for "
 		f"{total.requests - n_est} finished requests; for {n_est} requests the transcript only "
 		"holds a mid-stream snapshot, so output is estimated from visible text and tool input "
-		"(hidden thinking excluded). Treat output and total cost as a lower bound.",
+		"(hidden thinking excluded). Treat output and total cost as a lower bound."),
 		"",
 		table("By model and effort", ["Model", "Effort"], group(reqs, "model", "effort")),
 		table("By phase", ["Phase"], group(reqs, "phase")),
