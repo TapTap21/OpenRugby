@@ -482,7 +482,7 @@ Team colours are HomeColour and AwayColour, as RGBA in the team table. There are
 - goal posts are 5.6 m wide, at z ≈ 50 m from halfway (drop-goal zone centre at 52.8 m, 2.8 m behind the posts);
 - that is consistent with a 100 m field of play.
 
-In-goal depth was not found. Per-stadium variation is unknown and is probably in the stadium `.collision`/model files. This is for the physics/stadium leads. [U]
+The shared physics constants specify an in-goal depth of 14.1 m (dead-ball line at |z| = 64.1 m); see `docs/re/06-physics.md` §2.1. This replaces the earlier roster-side statement that the depth was not found. The pitch constant is observed, while any per-stadium variation remains unknown. [O/U]
 
 ## 10. Godot Resource mapping proposal
 

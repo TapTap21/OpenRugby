@@ -237,7 +237,7 @@ colour. Stage 1 is usually `dirt` or a detail map, kept in `materials[].extras.e
 | Up axis | +Y. Players stand on y = 0. | observed |
 | Facing / handedness | Nose and toes point to +Z and the bone named LArm is at +X. This matches glTF convention (+Z forward, +X = the asset's left), so no axis mirror is applied. | inferred; text orientation not yet checked |
 | Winding | With the strip parity rule, 785,250 of 787,752 triangles (99.7%) have a right-hand geometric normal opposite to their stored vertex normals. Front faces are clockwise, so the converter reverses winding for glTF. A back-face-culled textured render then shows the outside of the head and the inside of the stadium bowl. | observed |
-| Units | Player 96 units tall, ball 16 units long, pitch markings span x +/-1,774 by z +/-3,379, stadium about 12,500 across. Estimate about 48-54 units per metre (about 0.02 m per unit). The converter keeps native units. | inferred |
+| Units | Player 96 units tall, ball 16 units long, pitch markings span x +/-1,774 by z +/-3,379, stadium about 12,500 across. These dimensions suggest about 48-54 model units per metre (about 0.02 m per unit). The physics spec gives the gameplay conversion as 1 model unit = 0.01905 m; the asset measurements are consistent at this precision. The converter keeps native units. | inferred; conversion cross-reference in `docs/re/06-physics.md` §2.1 |
 
 ## 11. Walking from symbols to vertices (converter algorithm)
 
