@@ -200,7 +200,7 @@ Competition definitions as data (teams, pools, rounds, fixtures, points table, b
 - U2: Tie-break order for standings, and how runners-up are ranked (Euro Trophy, World Cup quarter-final pairings).
 - U3: Defaults for all settings; units of mission `halflength` (1 or 2) and `starttime`.
 - U4: Premiership standings points; Super 14 knockout seeding (1v4, 2v3 assumed, not observed).
-- U5: World League schedule file has 165 games for 36 teams (not all 44 teams, not full seasons), so season schedule is likely built per tier at runtime; mechanism unknown. Division membership at start unknown.
+- U5 (partly resolved, data only): the World League schedule file lists 44 teams and 44 locations but only three pools of 66, 43 and 56 games (165 total, Feb to May 2007, game ids local to each pool); only 12 distinct team slots appear as home/away in the games, so the file is a template of dates and venues that the runtime fills per tier, not a full season. Earlier text: World League schedule file has 165 games for 36 teams (not all 44 teams, not full seasons), so season schedule is likely built per tier at runtime; mechanism unknown. Division membership at start unknown.
 - U6: Mapping of the 39 history entries to the 92 mission files, and of `.rsg` hashes to loader slots (file contents identify them, not names).
 - U7: Meaning of schedule `environment` values and mission `type`/`matchtype`/`matchsubtype`.
 - U8: Multiplayer mode specifics, save-file format, how AI-vs-AI matches are simulated.
@@ -228,3 +228,7 @@ Not covered: binary tracing, per-fixture listing of Lions tours, French strings,
 2. Resolve the standings update function (win/draw/loss, 4-try and 7-point losing bonuses, tie-break sort) and the knockout seeding builder; name them `modes_*` and append to `.omc/research/functions/modes.tsv`.
 3. Find defaults for half length, difficulty, weather, injuries, fatigue (settings struct initialisers) to fill the "unknown" defaults in 2.5.
 4. Decode one `.rfe` settings screen only if the defaults are not in code. `record_unknown` for U1 to U9 and export the evidence bundle to `.omc/research/evidence/modes/`.
+
+## 10. Binary pass status
+
+Started after the REA gate: `.omc/research/REA_READY` did not exist when checked, so no mcp__rea__ analysis call was made. Mission time units (inferred, data only): `starttime` and score-event `time` values look like game seconds (2400 = 40 minutes, 6600 = 110 minutes, i.e. extra time), so `halflength` 1 or 2 is likely an index into the 5/10/20 option list, not minutes (unverified).
