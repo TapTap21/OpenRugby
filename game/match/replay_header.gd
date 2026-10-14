@@ -1,0 +1,60 @@
+class_name ReplayHeader
+extends RefCounted
+## Metadata stored with a recorded input log.
+
+const _INT_KEYS: PackedStringArray = [
+	"format_version", "seed", "tick_rate", "slot_count", "axes_per_slot"
+]
+const _STRING_KEYS: PackedStringArray = ["game_version", "mod_set_hash", "action_layout_hash"]
+
+var format_version: int = 1
+var game_version: String = ""
+var seed: int = 0
+var mod_set_hash: String = ""
+var action_layout_hash: String = ""
+var tick_rate: int = 60
+var slot_count: int = 1
+var axes_per_slot: int = 2
+
+
+## Builds a header from [param d]; null when a key is missing or has the wrong type.
+static func from_dict(d: Dictionary) -> ReplayHeader:
+	for key: String in _INT_KEYS:
+		if not d.has(key) or typeof(d[key]) != TYPE_INT:
+			return null
+	for key: String in _STRING_KEYS:
+		if not d.has(key) or typeof(d[key]) != TYPE_STRING:
+			return null
+	var header: ReplayHeader = ReplayHeader.new()
+	header.format_version = d["format_version"]
+	header.game_version = d["game_version"]
+	header.seed = d["seed"]
+	header.mod_set_hash = d["mod_set_hash"]
+	header.action_layout_hash = d["action_layout_hash"]
+	header.tick_rate = d["tick_rate"]
+	header.slot_count = d["slot_count"]
+	header.axes_per_slot = d["axes_per_slot"]
+	return header
+
+
+## Serialises the header to a dictionary.
+func to_dict() -> Dictionary:
+	return {
+		"format_version": format_version,
+		"game_version": game_version,
+		"seed": seed,
+		"mod_set_hash": mod_set_hash,
+		"action_layout_hash": action_layout_hash,
+		"tick_rate": tick_rate,
+		"slot_count": slot_count,
+		"axes_per_slot": axes_per_slot,
+	}
+
+
+## True when both hashes match and the tick rate equals the simulation tick rate.
+func is_compatible_with(p_mod_set_hash: String, p_action_layout_hash: String) -> bool:
+	return (
+		mod_set_hash == p_mod_set_hash
+		and action_layout_hash == p_action_layout_hash
+		and tick_rate == MatchSim.TICKS_PER_SECOND
+	)

@@ -1,0 +1,8 @@
+{
+  "patches": [
+    {
+      "target": "res://tests/fixtures/data/probe.tres",
+      "fields": {"nope": 1, "count": "seven", "strength": 0.25, "label": "errors"}
+    }
+  ]
+}

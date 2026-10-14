@@ -1,0 +1,5 @@
+{
+  "patches": [
+    {"target": "res://tests/fixtures/data/missing_target.tres", "fields": {"count": 3}}
+  ]
+}

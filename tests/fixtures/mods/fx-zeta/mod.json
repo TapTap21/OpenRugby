@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "id": "fx-zeta",
+  "name": "Fixture Script Zeta",
+  "version": "1.0.0",
+  "game_version": ">=0.1.0 <0.2.0",
+  "load_priority": 3,
+  "capabilities": ["scripts"],
+  "entry_script": "main.gd"
+}

@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "id": "fx-cycle-a",
+  "name": "Fixture Cycle A",
+  "version": "1.0.0",
+  "game_version": ">=0.1.0 <0.2.0",
+  "dependencies": [{"id": "fx-cycle-b"}],
+  "capabilities": []
+}

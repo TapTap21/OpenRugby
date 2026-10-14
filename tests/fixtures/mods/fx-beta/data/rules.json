@@ -1,0 +1,8 @@
+{
+  "patches": [
+    {
+      "target": "res://tests/fixtures/data/fixture_rules.tres",
+      "fields": {"points_try": 6}
+    }
+  ]
+}

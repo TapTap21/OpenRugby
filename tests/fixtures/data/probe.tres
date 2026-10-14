@@ -1,0 +1,26 @@
+[gd_resource type="Resource" script_class="FixtureProbe" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://tests/fixtures/data/fixture_probe.gd" id="1"]
+[ext_resource type="Script" path="res://game/data/kit.gd" id="2"]
+
+[sub_resource type="Resource" id="Resource_probe_kit"]
+script = ExtResource("2")
+id = &"probe_kit"
+
+[resource]
+script = ExtResource("1")
+count = 1
+ratio = 0.5
+strength = 1.0
+enabled = false
+label = "base"
+tag = &"base_tag"
+level = 0
+tint = Color(1, 1, 1, 1)
+offset = Vector3(0, 0, 0)
+kit = SubResource("Resource_probe_kit")
+bag = {
+&"b": 2,
+&"c": 3
+}
+values = Array[int]([1, 2, 3])

@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "id": "fx-optional",
+  "name": "Fixture Optional Dependency",
+  "version": "1.0.0",
+  "game_version": ">=0.1.0 <0.2.0",
+  "dependencies": [{"id": "fx-alpha", "optional": true}],
+  "load_priority": -10,
+  "capabilities": []
+}

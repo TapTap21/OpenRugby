@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "id": "fx-prio-a",
+  "name": "Fixture Priority Zero A",
+  "version": "1.0.0",
+  "game_version": ">=0.1.0 <0.2.0",
+  "load_priority": 0,
+  "capabilities": []
+}
