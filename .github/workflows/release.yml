@@ -1,0 +1,73 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+env:
+  GODOT_VERSION: "4.7.2"
+
+permissions:
+  contents: write
+
+jobs:
+  export:
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: ubuntu-latest
+            preset: Linux
+            output: openrugby.x86_64
+          - os: windows-latest
+            preset: Windows
+            output: openrugby.exe
+          - os: macos-latest
+            preset: macOS
+            output: openrugby.zip
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+      - uses: chickensoft-game/setup-godot@v2
+        with:
+          version: ${{ env.GODOT_VERSION }}
+          use-dotnet: false
+          include-templates: true
+      - name: Export ${{ matrix.preset }}
+        shell: bash
+        run: |
+          mkdir -p build
+          godot --headless --import || true
+          godot --headless --export-release "${{ matrix.preset }}" "build/${{ matrix.output }}"
+      - name: Package
+        shell: bash
+        run: |
+          cd build
+          name="openrugby-${{ github.ref_name }}-${{ matrix.preset }}"
+          if [ "${{ matrix.preset }}" = "macOS" ]; then
+            mv openrugby.zip "$name.zip"
+          elif [ "${{ runner.os }}" = "Windows" ]; then
+            7z a "$name.zip" "${{ matrix.output }}" openrugby.pck
+          else
+            zip "$name.zip" "${{ matrix.output }}" openrugby.pck
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.preset }}
+          path: build/openrugby-*.zip
+
+  publish:
+    needs: export
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: dist
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

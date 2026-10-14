@@ -1,0 +1,24 @@
+name: Feature request
+description: Propose a feature or improvement
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or goal
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+    validations:
+      required: true
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Where should this live
+      description: New features are built as mods first (see docs/PLAN.md section 1d).
+      options: [Base game (bug fix or platform capability), First-party mod, Community mod, Not sure]
+    validations:
+      required: true

@@ -1,0 +1,28 @@
+# Install: uv tool install pre-commit && pre-commit install
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.17.0
+    hooks:
+      - id: ruff
+        files: ^tools/
+        args: [--fix]
+      - id: ruff-format
+        files: ^tools/
+  - repo: local
+    hooks:
+      - id: gdformat
+        name: gdformat
+        entry: gdformat --line-length 100
+        language: system
+        files: ^(game|autoload|tests|mods)/.*\.gd$
+      - id: gdlint
+        name: gdlint
+        entry: gdlint
+        language: system
+        files: ^(game|autoload|tests|mods)/.*\.gd$
+      - id: hygiene
+        name: hygiene (no original assets or decompiled code)
+        entry: scripts/hygiene.sh
+        language: system
+        pass_filenames: false
+        always_run: true

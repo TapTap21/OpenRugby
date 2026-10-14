@@ -1,0 +1,42 @@
+name: Bug report
+description: Something behaves wrongly or differently from the original Rugby 08
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: Include expected vs actual behaviour. For fidelity bugs, describe the original game behaviour.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: OpenRugby version / commit
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Platform
+      options: [Linux, Windows, macOS]
+    validations:
+      required: true
+  - type: input
+    id: mods
+    attributes:
+      label: Enabled mods (or "Classic")
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / replay seed
+      render: shell
+  - type: markdown
+    attributes:
+      value: Do not attach original game files, extracted assets or decompiled code.

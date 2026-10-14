@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GODOT_VERSION: "4.7.2"
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+      - uses: astral-sh/setup-uv@v6
+      - name: Install gdtoolkit and ruff
+        run: uv tool install "gdtoolkit==4.*" && uv tool install ruff
+      - name: Hygiene
+        run: scripts/hygiene.sh
+      - name: gdlint
+        run: gdlint game autoload tests
+      - name: gdformat
+        run: gdformat --check --line-length 100 game autoload tests
+      - name: ruff
+        run: ruff check tools && ruff format --check tools
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+      - uses: chickensoft-game/setup-godot@v2
+        with:
+          version: ${{ env.GODOT_VERSION }}
+          use-dotnet: false
+      - name: gdUnit4 (headless)
+        run: scripts/test.sh
+        env:
+          GODOT_BIN: godot
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gdunit-reports
+          path: reports/
+          if-no-files-found: ignore
+
+  export-smoke:
+    needs: [lint, test]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            preset: Linux
+            output: build/openrugby.x86_64
+          - os: windows-latest
+            preset: Windows
+            output: build/openrugby.exe
+          - os: macos-latest
+            preset: macOS
+            output: build/openrugby.zip
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+      - uses: chickensoft-game/setup-godot@v2
+        with:
+          version: ${{ env.GODOT_VERSION }}
+          use-dotnet: false
+          include-templates: true
+      - name: Export ${{ matrix.preset }}
+        shell: bash
+        run: |
+          mkdir -p build
+          godot --headless --import || true
+          godot --headless --export-release "${{ matrix.preset }}" "${{ matrix.output }}"
+          ls -la build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: openrugby-${{ matrix.preset }}
+          path: build/
+          retention-days: 7

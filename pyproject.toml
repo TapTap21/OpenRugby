@@ -1,0 +1,16 @@
+# Tooling config for tools/ (Python extractors). No package code is defined here.
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["tools"]
+extend-exclude = ["original", "extracted", "addons", ".godot", "build"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tools/tests"]
+pythonpath = ["tools"]
+
+[tool.ruff.lint.per-file-ignores]
+"tools/ops/*" = ["W191", "E501"]

@@ -1,0 +1,28 @@
+name: Mod request
+description: Request a mod, an extension point or mod loader change
+labels: [mod]
+body:
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Request type
+      options: [New first-party mod idea, Missing extension point, Mod loader bug, Mod SDK docs]
+    validations:
+      required: true
+  - type: textarea
+    id: desc
+    attributes:
+      label: Description
+      description: Which data, assets, rules, scripts or UI should the mod change, and why can it not be done today?
+    validations:
+      required: true
+  - type: checkboxes
+    id: caps
+    attributes:
+      label: Capabilities needed
+      options:
+        - label: data
+        - label: assets
+        - label: rules
+        - label: scripts
+        - label: ui
