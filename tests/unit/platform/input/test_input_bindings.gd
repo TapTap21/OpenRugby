@@ -71,7 +71,7 @@ func _remove(path: String) -> void:
 		var removed: Error = DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
 
 
-## I-08: apply_defaults puts all 17 actions in InputMap and the default gamepad button for kick.
+## I-08: apply_defaults puts all 17 actions in InputMap and the default Cross button for kick.
 func test_i08_apply_defaults_fills_input_map() -> void:
 	var bindings: InputBindings = _defaults()
 	var missing: Array[String] = []
@@ -88,11 +88,11 @@ func test_i08_apply_defaults_fills_input_map() -> void:
 		var button: InputEventJoypadButton = kick_pads[0] as InputEventJoypadButton
 		@warning_ignore("unused_variable")
 		var r3: GdUnitBoolAssert = (
-			assert_bool(button != null and button.button_index == JOY_BUTTON_Y).is_true()
+			assert_bool(button != null and button.button_index == JOY_BUTTON_X).is_true()
 		)
 
 
-## I-09: rebinding kick to P succeeds, replaces K, and emits input_bindings_changed.
+## I-09: rebinding kick to P succeeds, replaces S, and emits input_bindings_changed.
 func test_i09_rebind_replaces_and_emits() -> void:
 	var bindings: InputBindings = _defaults()
 	@warning_ignore("unused_variable")
@@ -106,7 +106,7 @@ func test_i09_rebind_replaces_and_emits() -> void:
 	)
 	@warning_ignore("unused_variable")
 	var r3: GdUnitBoolAssert = (
-		assert_bool(InputMap.action_has_event(&"kick", _key(KEY_K))).is_false()
+		assert_bool(InputMap.action_has_event(&"kick", _key(KEY_S))).is_false()
 	)
 	@warning_ignore("unused_variable")
 	var r4: GdUnitArrayAssert = assert_array(_changed_hits).is_equal([1])
@@ -158,9 +158,9 @@ func test_i10_rebind_error_codes() -> void:
 ## I-11: find_conflicts reports co-active actions only.
 func test_i11_find_conflicts_respects_contexts() -> void:
 	var bindings: InputBindings = _defaults()
-	var on_j: Array[StringName] = bindings.find_conflicts(&"kick", _key(KEY_J))
+	var on_s: Array[StringName] = bindings.find_conflicts(&"kick", _key(KEY_S))
 	@warning_ignore("unused_variable")
-	var r1: GdUnitArrayAssert = assert_array(on_j).is_equal([&"tackle"])
+	var r1: GdUnitArrayAssert = assert_array(on_s).is_equal([&"tackle"])
 	var cancel_escape: Array[StringName] = bindings.find_conflicts(&"ui_cancel", _key(KEY_ESCAPE))
 	@warning_ignore("unused_variable")
 	var r2: GdUnitBoolAssert = assert_bool(cancel_escape.has(&"pause")).is_false()
@@ -177,7 +177,7 @@ func test_i12_reset_action_restores_defaults() -> void:
 	bindings.reset_action(&"kick")
 	@warning_ignore("unused_variable")
 	var r1: GdUnitBoolAssert = (
-		assert_bool(InputMap.action_has_event(&"kick", _key(KEY_K))).is_true()
+		assert_bool(InputMap.action_has_event(&"kick", _key(KEY_S))).is_true()
 	)
 	@warning_ignore("unused_variable")
 	var r2: GdUnitBoolAssert = (
@@ -210,7 +210,7 @@ func test_i13_save_reset_and_load_restores_rebinds() -> void:
 	bindings.reset_all()
 	@warning_ignore("unused_variable")
 	var r2: GdUnitBoolAssert = (
-		assert_bool(InputMap.action_has_event(&"kick", _key(KEY_K))).is_true()
+		assert_bool(InputMap.action_has_event(&"kick", _key(KEY_S))).is_true()
 	)
 	@warning_ignore("unused_variable")
 	var loaded: Error = bindings.load_from(path)
@@ -222,7 +222,7 @@ func test_i13_save_reset_and_load_restores_rebinds() -> void:
 	)
 	@warning_ignore("unused_variable")
 	var r5: GdUnitBoolAssert = (
-		assert_bool(InputMap.action_has_event(&"kick", _key(KEY_K))).is_false()
+		assert_bool(InputMap.action_has_event(&"kick", _key(KEY_S))).is_false()
 	)
 	@warning_ignore("unused_variable")
 	var r6: GdUnitBoolAssert = (
@@ -230,7 +230,7 @@ func test_i13_save_reset_and_load_restores_rebinds() -> void:
 	)
 	@warning_ignore("unused_variable")
 	var r7: GdUnitBoolAssert = (
-		assert_bool(InputMap.action_has_event(&"sprint", _key(KEY_SHIFT))).is_true()
+		assert_bool(InputMap.action_has_event(&"sprint", _key(KEY_SPACE))).is_true()
 	)
 	var file: ConfigFile = ConfigFile.new()
 	@warning_ignore("unused_variable")
@@ -262,7 +262,7 @@ func test_i14_load_errors_leave_bindings_unchanged() -> void:
 	)
 	@warning_ignore("unused_variable")
 	var r3: GdUnitBoolAssert = (
-		assert_bool(InputMap.action_has_event(&"kick", _key(KEY_K))).is_true()
+		assert_bool(InputMap.action_has_event(&"kick", _key(KEY_S))).is_true()
 	)
 	@warning_ignore("unused_variable")
 	var r4: GdUnitBoolAssert = (
