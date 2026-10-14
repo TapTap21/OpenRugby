@@ -30,15 +30,35 @@ Requirements: Godot 4.7.2 (see `.godot-version`) with matching export templates,
 [gdtoolkit](https://github.com/Scony/godot-gdscript-toolkit) 4.x, Python 3.12+ and `uv`.
 
 ```bash
+scripts/check-godot-safe.sh
 godot --headless --path . --import      # first-time import
+scripts/check-godot-safe.sh
 godot --path .                          # run the game
 scripts/test.sh                         # gdUnit4 tests, headless, non-zero exit on failure
 gdlint game autoload tests              # lint
 gdformat --check --line-length 100 game autoload tests
 scripts/hygiene.sh                      # no original assets / decompiled code in git
 PYTHONPATH=tools python -m openrugby_tools.pipeline --game-dir original --out extracted   # archives, textures, audio, models
+scripts/check-godot-safe.sh
 godot --headless --export-release Linux build/openrugby.x86_64   # export (also Windows, macOS)
 ```
+
+### Run the provisional sandbox
+
+The default project scene remains the title screen, and `godot --path .` still opens it. This
+explicit scene is a provisional generated-primitive sandbox with a limited movement, ball recovery,
+contact, kick and scoring loop: a quick way to run a small interactive scene, not a complete Rugby
+match or Classic gameplay.
+
+```bash
+scripts/check-godot-safe.sh
+godot --headless --path . --import
+
+scripts/check-godot-safe.sh
+godot --path . res://game/prototype/prototype_sandbox.tscn
+```
+
+Controls: arrow keys move, Space sprints, and S kicks while the player carries the ball.
 
 Optional: `uv tool install pre-commit && pre-commit install` to run the checks on every commit.
 
