@@ -1,0 +1,9 @@
+[gd_resource type="Resource" script_class="DifficultyProfile" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://game/data/difficulty_profile.gd" id="1_x"]
+
+[resource]
+script = ExtResource("1_x")
+id = &"normal"
+display_name_key = "DIFFICULTY_PLACEHOLDER"
+level = 1

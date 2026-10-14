@@ -1,0 +1,117 @@
+[gd_resource type="Resource" script_class="MatchFlowConfig" load_steps=27 format=3]
+
+[ext_resource type="Script" path="res://game/match/flow/match_flow_config.gd" id="1_flow"]
+[ext_resource type="Script" path="res://game/match/flow/match_state_def.gd" id="2_state"]
+[ext_resource type="Script" path="res://game/match/flow/match_transition_def.gd" id="3_trans"]
+[ext_resource type="Script" path="res://game/match/flow/match_condition.gd" id="4_cond"]
+[ext_resource type="Script" path="res://game/match/flow/conditions/condition_ticks_in_state.gd" id="5_tis"]
+[ext_resource type="Script" path="res://game/match/flow/conditions/condition_period_expired.gd" id="6_pe"]
+
+[sub_resource type="Resource" id="c_1"]
+script = ExtResource("5_tis")
+ticks = 1
+
+[sub_resource type="Resource" id="c_2"]
+script = ExtResource("6_pe")
+which = 2
+
+[sub_resource type="Resource" id="c_3"]
+script = ExtResource("6_pe")
+which = 1
+
+[sub_resource type="Resource" id="t_4"]
+script = ExtResource("3_trans")
+to = &"kick_off"
+condition = SubResource("c_1")
+period_effect = 1
+
+[sub_resource type="Resource" id="s_5"]
+script = ExtResource("2_state")
+id = &"pre_match"
+transitions = Array[ExtResource("3_trans")]([SubResource("t_4")])
+
+[sub_resource type="Resource" id="t_6"]
+script = ExtResource("3_trans")
+to = &"in_play"
+trigger = &"kick_off_taken"
+
+[sub_resource type="Resource" id="t_7"]
+script = ExtResource("3_trans")
+to = &"in_play"
+condition = SubResource("c_1")
+
+[sub_resource type="Resource" id="s_8"]
+script = ExtResource("2_state")
+id = &"kick_off"
+transitions = Array[ExtResource("3_trans")]([SubResource("t_6"), SubResource("t_7")])
+
+[sub_resource type="Resource" id="t_9"]
+script = ExtResource("3_trans")
+to = &"stoppage"
+trigger = &"whistle_blown"
+
+[sub_resource type="Resource" id="t_10"]
+script = ExtResource("3_trans")
+to = &"half_time"
+condition = SubResource("c_2")
+
+[sub_resource type="Resource" id="t_11"]
+script = ExtResource("3_trans")
+to = &"full_time"
+condition = SubResource("c_3")
+
+[sub_resource type="Resource" id="s_12"]
+script = ExtResource("2_state")
+id = &"in_play"
+clock_runs = true
+transitions = Array[ExtResource("3_trans")]([SubResource("t_9"), SubResource("t_10"), SubResource("t_11")])
+
+[sub_resource type="Resource" id="t_13"]
+script = ExtResource("3_trans")
+to = &"half_time"
+condition = SubResource("c_2")
+
+[sub_resource type="Resource" id="t_14"]
+script = ExtResource("3_trans")
+to = &"full_time"
+condition = SubResource("c_3")
+
+[sub_resource type="Resource" id="t_15"]
+script = ExtResource("3_trans")
+to = &"in_play"
+trigger = &"play_resumed"
+
+[sub_resource type="Resource" id="t_16"]
+script = ExtResource("3_trans")
+to = &"kick_off"
+trigger = &"restart_kick_off"
+
+[sub_resource type="Resource" id="s_17"]
+script = ExtResource("2_state")
+id = &"stoppage"
+clock_runs = true
+transitions = Array[ExtResource("3_trans")]([SubResource("t_13"), SubResource("t_14"), SubResource("t_15"), SubResource("t_16")])
+
+[sub_resource type="Resource" id="t_18"]
+script = ExtResource("3_trans")
+to = &"kick_off"
+condition = SubResource("c_1")
+period_effect = 2
+
+[sub_resource type="Resource" id="s_19"]
+script = ExtResource("2_state")
+id = &"half_time"
+ends_period = true
+transitions = Array[ExtResource("3_trans")]([SubResource("t_18")])
+
+[sub_resource type="Resource" id="s_20"]
+script = ExtResource("2_state")
+id = &"full_time"
+ends_period = true
+terminal = true
+transitions = Array[ExtResource("3_trans")]([])
+
+[resource]
+script = ExtResource("1_flow")
+initial_state = &"pre_match"
+states = Array[ExtResource("2_state")]([SubResource("s_5"), SubResource("s_8"), SubResource("s_12"), SubResource("s_17"), SubResource("s_19"), SubResource("s_20")])

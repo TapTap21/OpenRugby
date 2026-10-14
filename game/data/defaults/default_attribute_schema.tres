@@ -1,0 +1,8 @@
+[gd_resource type="Resource" script_class="PlayerAttributeSchema" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://game/data/player_attribute_schema.gd" id="1_x"]
+
+[resource]
+script = ExtResource("1_x")
+attribute_ids = Array[StringName]([&"speed", &"acceleration", &"agility", &"strength", &"stamina", &"handling", &"passing", &"kicking_power", &"kicking_accuracy", &"tackling", &"breaking_tackles", &"aggression", &"discipline", &"lineout", &"scrummaging"])
+position_ids = Array[StringName]([&"loosehead_prop", &"hooker", &"tighthead_prop", &"lock", &"blindside_flanker", &"openside_flanker", &"number_eight", &"scrum_half", &"fly_half", &"wing", &"inside_centre", &"outside_centre", &"full_back"])
