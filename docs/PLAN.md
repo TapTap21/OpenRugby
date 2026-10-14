@@ -391,6 +391,15 @@ constants, state diagrams, data layouts and open questions, plus ledger
 entries. No decompiled code in the repo; evidence bundles go to
 `.omc/research/` (gitignored).
 
+1a-0. **Unpack first.** The shipped exe is wrapped in the ViTALiTY
+    release-group packer (sections `.ROT`/`.IN`/`.HEAVEN`, stub entry in
+    `.HEAVEN`, real code decompressed into `.ROT` at runtime). Ghidra sees
+    11 functions and 37 strings in the packed file. An Opus agent dumps the
+    unpacked image from a Wine process (`tools/re/dump_wine_process.py`),
+    rebuilds the PE with resolved imports into `.omc/research/unpacked/`
+    (gitignored) and verifies it with REA. All later RE runs against the
+    unpacked image. Fallback if Wine fails: static reversal of the stub.
+
 1a. **Orientation** (orchestrator, direct, REA skill loaded): open binary, overview, segments,
     imports, strings dump, RTTI/class-name harvest, function count. Produce
     the brief for all leads.
