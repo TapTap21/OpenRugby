@@ -80,7 +80,10 @@ mod changes gameplay rules; `ui` is reserved for S11 menu injection (no S1 behav
 Mod entry scripts should not declare `class_name` (global class collisions between mods).
 
 Security, stated plainly in docs and UI later: script mods run arbitrary GDScript. There is no
-sandbox. Data- and asset-only mods cannot run code.
+sandbox. Strict warnings-as-errors settings apply to mod scripts, so an ignored return value can
+make an entry script fail to load. **Known limitations:** data- and asset-only mods can still run
+code through scripted `.tres` resources or `.gd` / scripted `.tres` overrides. S11 must close this
+gap by blocking script-bearing resources for mods without the `scripts` capability.
 
 ## 3. Versions
 

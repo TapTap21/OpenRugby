@@ -8,8 +8,6 @@ extends RefCounted
 ## nothing" check. Mounted packs stay mounted (Godot cannot unmount them).
 
 const BASE_ID: StringName = &"base"
-const EVENT_BUS_PATH: NodePath = ^"EventBus"
-
 var game_version: String = ""
 var mod_set_hash: String = ""
 var load_order: PackedStringArray = PackedStringArray()
@@ -38,10 +36,7 @@ func _init() -> void:
 
 ## Returns the event bus autoload, or null when it is not in the scene tree.
 static func event_bus() -> Node:
-	var tree: SceneTree = Engine.get_main_loop() as SceneTree
-	if tree == null or tree.root == null:
-		return null
-	return tree.root.get_node_or_null(EVENT_BUS_PATH)
+	return EventBusAccess.resolve()
 
 
 ## Returns the file that shadows [param path], or [param path] unchanged.

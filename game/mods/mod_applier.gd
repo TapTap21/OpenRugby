@@ -30,9 +30,9 @@ static func apply(plan: ModLoadPlan) -> ModRuntime:
 		if manifest.is_script_mod():
 			_run_entry(runtime, manifest)
 	runtime.activate()
-	var bus: Node = ModRuntime.event_bus()
-	if bus != null and bus.has_signal(&"mods_loaded"):
-		Signal(bus, &"mods_loaded").emit(runtime.mod_set_hash)
+	var emit_result: Error = EventBusAccess.emit(&"mods_loaded", [runtime.mod_set_hash])
+	if emit_result != OK and emit_result != ERR_UNAVAILABLE:
+		push_warning("ModApplier: could not emit mods_loaded (%s)" % error_string(emit_result))
 	return runtime
 
 
