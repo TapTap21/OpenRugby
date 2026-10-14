@@ -142,7 +142,7 @@ Header-derived duration (not decoded, unverified) for the undecodable archives: 
 
 - 3793 members, names identical to `dat_eng.big` (3793/3793 matched, same stems, `.hdr` vs `.dat`).
 - **Pairing (evidence):** each `dat_eng` member is a container of several concatenated SCHl streams, each starting at a 256-byte-aligned offset (3576 of 3788 members hold more than one; 11205 streams in total; the `SCHl` magic occurs only at 256-aligned offsets after the first). `.hdr` byte 5 equals the number of `SCHl` streams in the paired `.dat` on 3787 of 3788 members (miss: `KNOCK_ON_DROP_PUNT`, hdr 9 vs 8 found). The `.hdr` also lists the start offsets of streams 2..N in 256-byte units (e.g. `ADVANTAGE_GENERAL.hdr` ends `27 00 4d 00 6d 00 9f 00 70 70`, and the `.dat` has SCHl at 0, 39, 77, 109, 159 x 256). For 24-byte records the u16 at offset 16 times 256 equals the second stream's offset on 2602 of 2836 records. The earlier "u32@8 proportional to dat size" is therefore a size-like field, not a count of SCCl/SCDl chunks (the SCCl value, big-endian, equals the SCDl count of a stream on 3725 of 3788 members).
-- **Consequence:** the converter decodes only the first stream of each member (3788 of 11205 dat_eng streams, 7412 s). Splitting at the later 256-aligned `SCHl` offsets would yield the rest. Not done yet.
+- **Consequence (resolved):** the converter now splits each `dat_eng` member at its 256-aligned `SCHl` offsets (`audio.split_schl_container`, `convert --hdr-dir`). All 11481 scanned streams convert (11205 from the 3788 SCHl members, 276 from the 5 `SCORE_*` members). Result in the Unknowns section below.
 - Two record shapes by size: 24-byte (2836 records) and 16/20-byte (334 and 244 records, different prefixes such as `c4 05 ff ff` and `f6 05 ...`). Other sizes are rare (up to 100 bytes).
 - Observed on the 24-byte records:
   - uint32 LE at offset 8 is proportional to the `dat_eng` size. Ratio of dat bytes to this field: mean 262.92, stdev 1.98. The field is therefore a block or packet count for the `.dat`. The packet structure was not decoded, so treat this as a strong correlation, not a confirmed field meaning.
@@ -152,11 +152,13 @@ Header-derived duration (not decoded, unverified) for the undecodable archives: 
 
 ## Unknowns
 
-- `SCORE_*.dat` (5 members): `SCORE_LEAD_BY`, `SCORE_LEAD_BY_OVER`, `SCORE_LINES`, `SCORE_TRAIL_BY`, `SCORE_TRAIL_BY_MORE_THAN`. vgmstream rejects them because they begin with zero padding, but they are the same multi-stream containers as other `dat_eng` members: the first SCHl (GSTR, same header shape as dialogue) starts at the first 256-aligned offset after the zeros (21760, 1408000, 724224, 10240 and 1254400 bytes), followed by more 256-aligned SCHl streams. Presumably score-announcement speech (by name). Not converted yet (the converter skips files that do not start with SCHl).
+- `SCORE_*.dat` (5 members): `SCORE_LEAD_BY` (31 streams scanned, hdr 2), `SCORE_LEAD_BY_OVER` (8, hdr 1), `SCORE_LINES` (209, hdr 20), `SCORE_TRAIL_BY` (20, hdr 1), `SCORE_TRAIL_BY_MORE_THAN` (8, hdr 1). First SCHl at 21760, 1408000, 724224, 10240 and 1254400 bytes, as before. All 276 scanned streams decode via vgmstream (1.5 to 3.2 s each, 452 s for SCORE_LINES alone). The hdr counts disagree with the scan for all five, so the hdr's role for these members is unexplained. Whether the extra SCHl hits are real clips (decoded audio is plausible) or structure the hdr does not describe is not verified by listening. Output in `extracted/ogg/dat_eng.big/SCORE_*/`.
 - `aems/*.abk` (17 ABKC): sound-bank format, not converted. `aems/rugby2k8.csi` is the MOIR member, format unknown.
 - `pbp.evt`: unknown; not converted.
 - Runtime decoding: the GSTR `0xA0 = 4` streams are EA MicroTalk (decoded offline via vgmstream, dev-time only). Open item: the game needs its own MicroTalk (UTK) decoder or shipped pre-converted OGG; licensing of either route is undecided.
-- Open item: split the multi-stream `dat_eng` members (and `SCORE_*`) at 256-aligned `SCHl` offsets to decode all 11205+ streams.
+- **Resolved: multi-stream `dat_eng` split.** Run of `convert extracted/audio/dat_eng.big extracted/ogg/dat_eng.big --hdr-dir extracted/audio/hdr_eng.big` (container mode; 8 workers, 193 s wall, vgmstream decodes all 11481 streams, ffmpeg 0 streams, 0 failed). Output `extracted/ogg/dat_eng.big/<stem>/<NN>.ogg` (0-based index, `NN` = position in the container); `index.json` has one entry per stream with `container`, `stream_index`, `hdr_count`, `hdr_offset_match`. Totals: 11481 streams, 28704.9 s (7 h 58 min) of audio, 257 MB of OGG. Scanned streams = 11205 for the 3788 SCHl members, matching the 11205 figure above. Stream count vs hdr byte 5: sum of hdr counts 11231 vs 11481 scanned; the difference is the 5 `SCORE_*` members (hdr 25 vs 276 scanned), and KNOCK_ON_DROP_PUNT (hdr 9, 8 scanned). `hdr_offset_match` is true for 3787 of 3793 containers.
+- **KNOCK_ON_DROP_PUNT (hdr 9, scanned 8):** the hdr's offset records contain low byte `0xB8` twice, i.e. two entries at unit 184. Only one `SCHl` exists at unit 184 in the file, so the 9th entry is a zero-length stream that shares its start with a neighbour. Treated as 8 real streams; the hdr-declared 9th is not emitted.
+- **hdr offset check is partial:** only the low byte of each start (256-byte units) is checked, in order, against the record body; the high byte encoding is not decoded. The check is therefore weaker than an exact match, and the `hdr_offset_match` flag should be read with that in mind.
 - `0x06`, `0x0B`, and the 0x84 absence in TUTORIAL and crowd_reactions: meaning unknown.
 
 ## Reproduce
@@ -164,6 +166,7 @@ Header-derived duration (not decoded, unverified) for the undecodable archives: 
 ```sh
 PYTHONPATH=tools .omc/research/venv/bin/python -m openrugby_tools extract <Audio>/<name>.big -o extracted/audio/<name>.big
 PYTHONPATH=tools .omc/research/venv/bin/python -m openrugby_tools.audio convert extracted/audio extracted/ogg   # add --vgmstream PATH if not in .omc/research/bin
+PYTHONPATH=tools .omc/research/venv/bin/python -m openrugby_tools.audio convert extracted/audio/dat_eng.big extracted/ogg/dat_eng.big --hdr-dir extracted/audio/hdr_eng.big   # container mode
 PYTHONPATH=tools .omc/research/venv/bin/python -m openrugby_tools.audio convert <Audio>/nzh.dat extracted/ogg-standalone
 ```
 

@@ -36,6 +36,7 @@ scripts/test.sh                         # gdUnit4 tests, headless, non-zero exit
 gdlint game autoload tests              # lint
 gdformat --check --line-length 100 game autoload tests
 scripts/hygiene.sh                      # no original assets / decompiled code in git
+PYTHONPATH=tools python -m openrugby_tools.pipeline --game-dir original --out extracted   # archives, textures, audio, models
 godot --headless --export-release Linux build/openrugby.x86_64   # export (also Windows, macOS)
 ```
 

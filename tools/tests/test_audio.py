@@ -205,3 +205,109 @@ def test_ffmpeg_stream_keeps_ffmpeg_decoder(tmp_path: Path) -> None:
     result = audio.convert_one(src, src.parent, tmp_path, vgmstream=VGMSTREAM)
     assert result.ok, result.error
     assert result.decoder == "ffmpeg"
+
+
+SCEL_END = b"SCEl" + struct.pack("<I", 8)
+
+
+def fake_stream(tag: int) -> bytes:
+    """A synthetic SCHl stream: header, SCCl stub, and the 8-byte SCEl end chunk."""
+    head = build_schl(item(0x80, 1, 1) + item(0x9C, tag, 1) + item(0x85, 1000 + tag, 2))
+    return head + SCEL_END
+
+
+def make_container(streams: list[bytes], prefix: int = 0) -> tuple[bytes, list[int]]:
+    """Concatenate streams, each starting on a 256-byte boundary and zero-padded after SCEl."""
+    data = bytearray(b"\0" * prefix)
+    starts: list[int] = []
+    for stream in streams:
+        assert len(data) % 256 == 0
+        starts.append(len(data))
+        data += stream
+        data += b"\0" * (-len(data) % 256)
+    return bytes(data), starts
+
+
+def make_hdr(count: int, starts: list[int]) -> bytes:
+    """Build an hdr_eng-shaped record: count at byte 5, low bytes of starts 2..N (256 units)."""
+    body = bytearray(b"\xf6\x05\x00\x00\x00" + bytes([count]) + b"\x00\x00")
+    body += b"\0" * (14 - len(body))
+    for start in starts[1:]:
+        body += bytes([(start // 256) & 0xFF, 0x00])
+    body += b"\x70\x70"
+    return bytes(body)
+
+
+def test_split_three_streams_at_aligned_offsets() -> None:
+    streams = [fake_stream(1), fake_stream(2), fake_stream(3)]
+    data, starts = make_container(streams)
+    hdr = make_hdr(3, starts)
+    parts = audio.split_schl_container(data, hdr)
+    assert [idx for idx, _ in parts] == [0, 1, 2]
+    assert [blob for _, blob in parts] == streams  # trailing zero padding trimmed
+    assert all(start % 256 == 0 for start in starts)
+    assert audio.find_stream_starts(data) == starts
+    assert audio.hdr_offsets_match(starts, hdr) is True
+
+
+def test_split_without_hdr_uses_scan_only() -> None:
+    streams = [fake_stream(7), fake_stream(8)]
+    data, _ = make_container(streams)
+    parts = audio.split_schl_container(data, None)
+    assert [blob for _, blob in parts] == streams
+
+
+def test_split_zero_prefixed_container_skips_padding() -> None:
+    streams = [fake_stream(4), fake_stream(5)]
+    data, starts = make_container(streams, prefix=1024)
+    assert data[:1024] == b"\0" * 1024
+    assert starts == [1024, 1024 + 256 * ((len(streams[0]) + 255) // 256)]
+    hdr = make_hdr(2, starts)
+    parts = audio.split_schl_container(data, hdr)
+    assert len(parts) == 2
+    assert parts[0][1].startswith(b"SCHl")
+    assert parts[0][1] == streams[0]
+    assert audio.hdr_offsets_match(starts, hdr) is True
+
+
+def test_split_ignores_unaligned_magic() -> None:
+    data, starts = make_container([fake_stream(1), fake_stream(2)])
+    # Plant a magic inside the padding of the first stream at a non-aligned offset.
+    poisoned = bytearray(data)
+    poisoned[starts[0] + 100 : starts[0] + 104] = b"SCHl"
+    assert audio.find_stream_starts(bytes(poisoned)) == starts
+
+
+def test_hdr_count_mismatch_warns_but_keeps_scanned_streams() -> None:
+    streams = [fake_stream(1), fake_stream(2), fake_stream(3)]
+    data, starts = make_container(streams)
+    bad_hdr = make_hdr(4, starts)  # claims one more stream than the scan finds
+    with pytest.warns(UserWarning, match="hdr disagrees"):
+        parts = audio.split_schl_container(data, bad_hdr)
+    assert [blob for _, blob in parts] == streams
+    assert audio.hdr_offsets_match(starts, bad_hdr) is False
+
+
+def test_hdr_offset_mismatch_detected() -> None:
+    streams = [fake_stream(1), fake_stream(2), fake_stream(3)]
+    data, starts = make_container(streams)
+    wrong = make_hdr(3, [starts[0], starts[1] + 256, starts[2]])
+    assert audio.hdr_offsets_match(audio.find_stream_starts(data), wrong) is False
+
+
+def test_container_without_schl_yields_no_streams() -> None:
+    assert audio.find_stream_starts(b"\0" * 1024) == []
+    assert audio.split_schl_container(b"\0" * 1024, None) == []
+
+
+def test_convert_container_zero_file_fails_without_output(tmp_path: Path) -> None:
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "zeros.dat").write_bytes(b"\0" * 512)
+    results = audio.convert_container(src / "zeros.dat", src, tmp_path / "out", None)
+    assert len(results) == 1
+    assert results[0].ok is False
+    assert results[0].stream_index is None
+    assert not (tmp_path / "out" / "zeros").exists() or not any(
+        (tmp_path / "out" / "zeros").iterdir()
+    )

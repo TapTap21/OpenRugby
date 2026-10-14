@@ -498,6 +498,14 @@ placeholder capsules and a flat pitch. Visual milestone: after S7.
 
 ## 4. Rules the pipeline enforces
 
+0. **Fidelity is behavioural, never structural.** The reimplementation must play
+   like Rugby 08 (rules, timings, constants, outcomes), but its code owes the
+   original nothing: no mirroring of HB Studios class names, call graphs, data
+   layouts, globals or update order. Rename, split, merge and rearchitect freely
+   whenever it gives clearer, idiomatic, testable Godot code. RE specs describe
+   *what happens and with which numbers*; the architect decides *how* it is built.
+   If a spec reads like a port of the original code, rewrite the design, not the code.
+
 1. **Spec before code.** No implementer starts without a `docs/re/` or slice
    spec with acceptance criteria.
 2. **Tests from spec, not from code.** Test engineer reads the spec, never the

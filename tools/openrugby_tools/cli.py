@@ -9,7 +9,7 @@ import time
 from collections import Counter, defaultdict
 from pathlib import Path
 
-from . import refpack
+from . import pipeline, refpack
 from .bigf import BigfArchive, BigfError, extract_all
 
 REPO = Path(__file__).resolve().parents[2]
@@ -279,6 +279,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--inventory-dir")
     p.add_argument("-o", "--out")
     p.set_defaults(fn=cmd_report)
+    p = sub.add_parser("pipeline", help="run the full extract/convert pipeline into one directory")
+    pipeline.add_arguments(p)
+    p.set_defaults(fn=pipeline.run_from_args)
     a = ap.parse_args(argv)
     try:
         return int(a.fn(a))

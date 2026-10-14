@@ -38,6 +38,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import warnings
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -56,6 +57,10 @@ TAG_CHANNELS = 0x82
 TAG_RATE = 0x84
 TAG_SAMPLES = 0x85
 TAG_REVISION2 = 0xA0
+SCEL_MAGIC = b"SCEl"
+SCEL_SIZE = 8
+STREAM_ALIGN = 256
+HDR_BODY_START = 14
 _SKIP_MARKERS = frozenset({0x00, 0xFD})
 _END_TAG = 0xFF
 
@@ -203,6 +208,10 @@ class ConversionResult:
     rate: int | None = None
     output_bytes: int | None = None
     decoder: str | None = None
+    container: str | None = None
+    stream_index: int | None = None
+    hdr_count: int | None = None
+    hdr_offset_match: bool | None = None
 
 
 def _ffmpeg_error(stderr: str) -> str:
@@ -311,6 +320,50 @@ def _encode_with_vgmstream(
         return None if proc.returncode == 0 else _ffmpeg_error(proc.stderr)
 
 
+def _encode_source(
+    source: Path, out_path: Path, head: SchlHeader, quality: int, vgmstream: Path | None
+) -> tuple[str, str | None]:
+    """Encode one ``SCHl`` file to OGG.
+
+    Returns ``(decoder, error)``; ``error`` is None on success.
+    """
+    decoder = "ffmpeg"
+    error: str | None = None
+    # 0xA0 streams are known to fail in ffmpeg, so skip straight to vgmstream.
+    if head.revision2 is None or vgmstream is None:
+        error = _encode_with_ffmpeg(source, out_path, quality)
+    else:
+        error = "skipped ffmpeg: header carries 0xA0"
+    if error is not None and vgmstream is not None:
+        decoder = "vgmstream"
+        error = _encode_with_vgmstream(source, out_path, quality, vgmstream)
+    return decoder, error
+
+
+def _finish_ogg(
+    out_path: Path, decoder: str, header: dict[str, Any], rel_str: str, out_root: Path
+) -> ConversionResult:
+    """Probe a freshly written OGG and build its result record."""
+    try:
+        info = probe_ogg(out_path)
+    except (subprocess.CalledProcessError, KeyError, IndexError, ValueError) as exc:
+        return ConversionResult(
+            rel_str, out_path.as_posix(), False, f"ffprobe: {exc}", header, decoder=decoder
+        )
+    return ConversionResult(
+        source=rel_str,
+        output=out_path.relative_to(out_root).as_posix(),
+        ok=True,
+        error=None,
+        header=header,
+        duration=info["duration"],
+        channels=info["channels"],
+        rate=info["rate"],
+        output_bytes=out_path.stat().st_size,
+        decoder=decoder,
+    )
+
+
 def convert_one(
     source: Path,
     src_root: Path,
@@ -336,38 +389,173 @@ def convert_one(
 
     out_path = (out_root / rel).with_suffix(".ogg")
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    decoder = "ffmpeg"
-    error: str | None = None
-    # 0xA0 streams are known to fail in ffmpeg, so skip straight to vgmstream.
-    if head.revision2 is None or vgmstream is None:
-        error = _encode_with_ffmpeg(source, out_path, quality)
-    else:
-        error = "skipped ffmpeg: header carries 0xA0"
-    if error is not None and vgmstream is not None:
-        decoder = "vgmstream"
-        error = _encode_with_vgmstream(source, out_path, quality, vgmstream)
+    decoder, error = _encode_source(source, out_path, head, quality, vgmstream)
     if error is not None:
         out_path.unlink(missing_ok=True)
         return ConversionResult(rel_str, None, False, error, header, decoder=decoder)
+    return _finish_ogg(out_path, decoder, header, rel_str, out_root)
 
-    try:
-        info = probe_ogg(out_path)
-    except (subprocess.CalledProcessError, KeyError, IndexError, ValueError) as exc:
-        return ConversionResult(
-            rel_str, out_path.as_posix(), False, f"ffprobe: {exc}", header, decoder=decoder
+
+def find_stream_starts(data: bytes) -> list[int]:
+    """Byte offsets of every ``SCHl`` magic that sits on a 256-byte boundary.
+
+    Primary split method for ``dat_eng`` containers. Zero padding before the first
+    stream (``SCORE_*``) is skipped because only aligned magics are returned.
+    """
+    starts: list[int] = []
+    pos = data.find(MAGIC)
+    while pos >= 0:
+        if pos % STREAM_ALIGN == 0:
+            starts.append(pos)
+        pos = data.find(MAGIC, pos + 1)
+    return starts
+
+
+def _stream_end(data: bytes, start: int, next_start: int | None) -> int:
+    """End of the stream beginning at ``start``.
+
+    The stream ends after its ``SCEl`` end chunk (8 bytes) when one lies before the
+    next stream; otherwise it runs to the next start with trailing zeros removed.
+    """
+    limit = next_start if next_start is not None else len(data)
+    scel = data.rfind(SCEL_MAGIC, start, limit)
+    if scel >= 0 and limit - scel >= SCEL_SIZE:
+        (size,) = struct.unpack_from("<I", data, scel + 4)
+        if size == SCEL_SIZE:
+            return scel + SCEL_SIZE
+    return start + len(data[start:limit].rstrip(b"\0"))
+
+
+def hdr_offsets_match(starts: list[int], hdr: bytes) -> bool:
+    """Cross-check scanned stream starts against a ``hdr_eng`` record.
+
+    The record's byte 5 must equal the number of scanned streams, and the low byte
+    of each start offset (in 256-byte units) for streams 2..N must occur in the
+    record body in the same order. The high byte of each offset is not decoded
+    (see docs/re/03-audio.md), so this is a partial check, not a full one.
+    """
+    if len(hdr) < 6 or hdr[5] != len(starts):
+        return False
+    pos = HDR_BODY_START
+    for start in starts[1:]:
+        low = bytes([(start // STREAM_ALIGN) & 0xFF])
+        found = hdr.find(low, pos)
+        if found < 0:
+            return False
+        pos = found + 1
+    return True
+
+
+def split_schl_container(data: bytes, hdr: bytes | None) -> list[tuple[int, bytes]]:
+    """Split a concatenated ``SCHl`` container into ``(index, stream_bytes)`` pairs.
+
+    Stream starts come from :func:`find_stream_starts`. When ``hdr`` is given it is
+    checked with :func:`hdr_offsets_match`; a disagreement emits a ``UserWarning``
+    but the scanned streams are still returned, because the scan is the authority
+    (see the KNOCK_ON_DROP_PUNT note in docs/re/03-audio.md). Index 0 is the first
+    stream in the container.
+    """
+    starts = find_stream_starts(data)
+    if hdr is not None and not hdr_offsets_match(starts, hdr):
+        warnings.warn(
+            f"hdr disagrees with scanned starts (hdr count {hdr[5] if len(hdr) > 5 else '?'},"
+            f" scanned {len(starts)})",
+            UserWarning,
+            stacklevel=2,
         )
-    return ConversionResult(
-        source=rel_str,
-        output=out_path.relative_to(out_root).as_posix(),
-        ok=True,
-        error=None,
-        header=header,
-        duration=info["duration"],
-        channels=info["channels"],
-        rate=info["rate"],
-        output_bytes=out_path.stat().st_size,
-        decoder=decoder,
-    )
+    streams: list[tuple[int, bytes]] = []
+    for idx, start in enumerate(starts):
+        next_start = starts[idx + 1] if idx + 1 < len(starts) else None
+        end = _stream_end(data, start, next_start)
+        streams.append((idx, data[start:end]))
+    return streams
+
+
+def convert_container(
+    path: Path,
+    src_root: Path,
+    out_root: Path,
+    hdr_path: Path | None,
+    quality: int = DEFAULT_QUALITY,
+    vgmstream: Path | None = None,
+) -> list[ConversionResult]:
+    """Split one container member and convert each stream to ``<out>/<stem>/<NN>.ogg``.
+
+    Any single-stream ``<stem>.ogg`` left from an earlier run is removed, since the
+    per-stream directory replaces it. Returns one result per scanned stream, or one
+    failed result when the container holds no aligned ``SCHl`` at all.
+    """
+    rel = path.relative_to(src_root)
+    container = rel.as_posix()
+    stem_dir = out_root / rel.with_suffix("")
+    (out_root / rel).with_suffix(".ogg").unlink(missing_ok=True)
+    data = path.read_bytes()
+    hdr = hdr_path.read_bytes() if hdr_path is not None and hdr_path.is_file() else None
+    starts = find_stream_starts(data)
+    hdr_count = hdr[5] if hdr is not None and len(hdr) > 5 else None
+    if not starts:
+        return [
+            ConversionResult(
+                container,
+                None,
+                False,
+                "no SCHl at a 256-byte offset",
+                {},
+                container=container,
+                stream_index=None,
+                hdr_count=hdr_count,
+                hdr_offset_match=None,
+            )
+        ]
+    match = hdr_offsets_match(starts, hdr) if hdr is not None else None
+    stem_dir.mkdir(parents=True, exist_ok=True)
+    results: list[ConversionResult] = []
+    for idx, stream in split_schl_container(data, hdr):
+        stream_rel = f"{rel.with_suffix('').as_posix()}/{idx:02d}"
+        out_path = out_root / f"{stream_rel}.ogg"
+        try:
+            head = parse_schl_header(stream[:4096])
+            header: dict[str, Any] = head.as_dict()
+        except SchlError as exc:
+            results.append(
+                ConversionResult(
+                    stream_rel,
+                    None,
+                    False,
+                    f"header: {exc}",
+                    {},
+                    container=container,
+                    stream_index=idx,
+                    hdr_count=hdr_count,
+                    hdr_offset_match=match,
+                )
+            )
+            continue
+        with tempfile.TemporaryDirectory(prefix="openrugby-stream-") as tmp:
+            tmp_src = Path(tmp) / "stream.snd"
+            tmp_src.write_bytes(stream)
+            decoder, error = _encode_source(tmp_src, out_path, head, quality, vgmstream)
+            if error is not None:
+                out_path.unlink(missing_ok=True)
+                result = ConversionResult(stream_rel, None, False, error, header, decoder=decoder)
+            else:
+                result = _finish_ogg(out_path, decoder, header, stream_rel, out_root)
+        result.source = f"{container}#{idx:02d}"
+        result.container = container
+        result.stream_index = idx
+        result.hdr_count = hdr_count
+        result.hdr_offset_match = match
+        results.append(result)
+    return results
+
+
+def _entry(result: ConversionResult) -> dict[str, Any]:
+    """Index record. Container fields are emitted only for container-mode results."""
+    data = asdict(result)
+    if result.container is None:
+        for key in ("container", "stream_index", "hdr_count", "hdr_offset_match"):
+            data.pop(key)
+    return data
 
 
 def convert_tree(
@@ -376,11 +564,17 @@ def convert_tree(
     workers: int = DEFAULT_WORKERS,
     quality: int = DEFAULT_QUALITY,
     vgmstream: Path | None = None,
+    hdr_dir: Path | None = None,
 ) -> dict[str, Any]:
     """Convert every ``SCHl`` file under ``src`` and write ``out/index.json``.
 
     Returns the index document (also written to disk). Non-``SCHl`` files are
     ignored, so ``SCORE_*.dat`` zero-filled members and ABKC/MOIR files are skipped.
+
+    With ``hdr_dir`` set, ``src`` is treated as a directory of ``dat`` containers:
+    each ``<stem>.dat`` is split into its ``SCHl`` streams (see
+    :func:`convert_container`) and the paired ``<hdr_dir>/<stem>.hdr`` is used as the
+    cross-check. Each stream becomes ``<out>/<stem>/<NN>.ogg``.
 
     Raises:
         RuntimeError: if ffmpeg or ffprobe is not on PATH.
@@ -390,11 +584,25 @@ def convert_tree(
     src = src.resolve()
     out = out.resolve()
     out.mkdir(parents=True, exist_ok=True)
-    files = find_schl_files(src)
     root = src if src.is_dir() else src.parent
     started = time.monotonic()
-    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
-        results = list(pool.map(lambda f: convert_one(f, root, out, quality, vgmstream), files))
+    if hdr_dir is not None:
+        hdr_dir = hdr_dir.resolve()
+        containers = sorted(p for p in src.rglob("*.dat") if p.is_file())
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+            per_container = list(
+                pool.map(
+                    lambda f: convert_container(
+                        f, root, out, hdr_dir / (f.stem + ".hdr"), quality, vgmstream
+                    ),
+                    containers,
+                )
+            )
+        results = [r for group in per_container for r in group]
+    else:
+        files = find_schl_files(src)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+            results = list(pool.map(lambda f: convert_one(f, root, out, quality, vgmstream), files))
     elapsed = time.monotonic() - started
     results.sort(key=lambda r: r.source)
     ok = [r for r in results if r.ok]
@@ -410,10 +618,35 @@ def convert_tree(
         "vgmstream": str(vgmstream) if vgmstream else None,
         "by_decoder": {d: sum(1 for r in ok if r.decoder == d) for d in ("ffmpeg", "vgmstream")},
     }
+    if hdr_dir is not None:
+        containers = {r.container for r in results if r.container}
+        summary.update(
+            {
+                "mode": "containers",
+                "hdr_dir": str(hdr_dir),
+                "containers": len(containers),
+                "containers_no_stream": sum(
+                    1 for r in results if r.container and r.stream_index is None
+                ),
+                "hdr_count_total": sum(
+                    {r.container: r.hdr_count or 0 for r in results if r.container}.values()
+                ),
+                "hdr_offset_match_true": sum(
+                    1 for r in results if r.stream_index == 0 and r.hdr_offset_match
+                ),
+                "hdr_offset_mismatch": sorted(
+                    {
+                        r.container
+                        for r in results
+                        if r.stream_index == 0 and r.hdr_offset_match is False
+                    }
+                ),
+            }
+        )
     index: dict[str, Any] = {
         "source_root": str(src),
         "summary": summary,
-        "entries": [asdict(r) for r in results],
+        "entries": [_entry(r) for r in results],
     }
     tmp = out / "index.json.tmp"
     tmp.write_text(json.dumps(index, indent=2) + "\n", encoding="utf-8")
@@ -429,6 +662,12 @@ def _build_parser() -> argparse.ArgumentParser:
     conv.add_argument("out", type=Path, help="output directory (index.json is written here)")
     conv.add_argument("--workers", type=int, default=DEFAULT_WORKERS)
     conv.add_argument("-q", "--quality", type=int, default=DEFAULT_QUALITY)
+    conv.add_argument(
+        "--hdr-dir",
+        type=Path,
+        default=None,
+        help="container mode: split each <stem>.dat in src, check against <dir>/<stem>.hdr",
+    )
     conv.add_argument(
         "--vgmstream",
         type=Path,
@@ -447,7 +686,12 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         vgm = find_vgmstream(args.vgmstream)
         index = convert_tree(
-            args.src, args.out, workers=args.workers, quality=args.quality, vgmstream=vgm
+            args.src,
+            args.out,
+            workers=args.workers,
+            quality=args.quality,
+            vgmstream=vgm,
+            hdr_dir=args.hdr_dir,
         )
         print(json.dumps(index["summary"], indent=2))
         return 0

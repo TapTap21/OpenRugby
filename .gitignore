@@ -6,6 +6,7 @@
 .omc/
 /original
 /extracted/
+/extracted-pipeline/
 /build/
 .idea/
 
@@ -24,3 +25,9 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .venv/
+
+# Agent worktrees
+/.claude/worktrees/
+
+# Local tool state
+/.context/

@@ -205,3 +205,13 @@ def test_parse_tar_and_normalise() -> None:
     assert eagl.normalise_symbol("__Model:::PlayerHigh.variation3") == (
         "__Model:::<model>.variation#"
     )
+
+
+def test_gltf_export_empty_asset_has_no_empty_arrays(tmp_path: Path) -> None:
+    obj = eagl.ElfObject(build_elf(w(0, 0), [], []))
+    out = tmp_path / "empty.gltf"
+    eagl.export_gltf(eagl.decode(obj), out)
+    doc = json.loads(out.read_text())
+    assert all(not (isinstance(v, list) and not v) for v in doc.values())
+    assert "buffers" not in doc and not (tmp_path / "empty.bin").exists()
+    assert doc["scenes"] == [{}]
