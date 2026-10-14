@@ -352,6 +352,52 @@ every downstream slice inherits that error.
 
 ---
 
+## 2b. Provider fallback: GPT luna-high when Claude credits run out
+
+The programme must keep moving if Claude credits are exhausted. The fallback is
+**GPT luna-high** (as named by the project owner; accessed through an agent
+harness that supports it, e.g. Codex CLI or a T3 Code provider). The process is
+provider-neutral by design: all state lives in the repo and `.omc/`, never only
+in a chat transcript.
+
+**Trigger.** Switch when a Claude session reports credit or quota exhaustion, or
+when the owner says so. Switch back when credits return; work continues from disk.
+
+**Role mapping.** One model replaces the Claude tiers, so effort carries the tiering:
+
+| Claude role | Fallback |
+|---|---|
+| Haiku 5.5 low/medium (inventory, tests from spec, verifier, docs) | luna at its lowest effort that passes the gate |
+| Sonnet 5.5 medium (implementer, reviewer, asset tools) | luna-high |
+| Opus 5.5 high/xhigh (RE leads, rules/physics/AI core, gate review) | luna-high, plus a mandatory second luna-high review pass |
+
+**Hand-off protocol (what makes a switch lossless).**
+- Every agent writes progress to its files continuously: specs in `docs/re/`,
+  function indices in `.omc/research/functions/*.tsv`, notes and resume plans in
+  `.omc/research/<subsystem>/`, slice resume notes in `docs/specs/*-RESUME.md`.
+- Slice work is committed to its branch at each consistent point (WIP commits are fine).
+- `AGENTS.md` at the repo root is the single entry point for any agent tool and
+  points at this plan, `docs/CONVENTIONS.md`, `.omc/research/PHASE1_BRIEF.md` and the
+  safety scripts. Tool-specific files (`CLAUDE.md`, etc.) may add to it, never contradict it.
+- Before switching, the orchestrator writes `.omc/HANDOFF.md`: running work, branches,
+  pending reviews and merges, open questions, and the next three actions.
+
+**Tooling parity the fallback harness needs.**
+- The REA MCP server, configured with `REA_GHIDRA_STARTUP_TIMEOUT_MS=1800000`, plus the same
+  single-shared-target rules (one target, readiness markers, never close the session).
+- Godot 4.7.2, gdtoolkit, the tools venv, ffmpeg and vgmstream (as already installed).
+- The same safety rules: `scripts/check-godot-safe.sh` before any Godot run, never write
+  to the game install, never commit originals or decompiled code.
+
+**Quality rules do not relax.** Author is never the reviewer; reviewer effort is never
+below author effort; behavioural fidelity only (section 4 rule 0); every merge passes
+the same gates. Commits made on the fallback carry an attribution trailer naming the
+model that wrote them, so history shows which provider produced what.
+
+**Cost tracking.** `tools/ops/token_ledger.py` reads Claude transcripts only. Fallback
+usage is recorded from the provider's own usage report into `.omc/ledger/fallback.md`
+(date, phase, role, tokens, cost) and summed with the Claude ledger in milestone reports.
+
 ## 3. Phases
 
 ### Phase 0 — Environment and scaffolding (orchestrator + 3 agents, ~1 hour)
