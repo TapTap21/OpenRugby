@@ -1,6 +1,7 @@
 # S1-core: match simulation, flow, clock, pitch, data model
 
 - Slice: S1 (core). Architecture: [ADR-004](../adr/ADR-004-core-architecture.md), ADR-001.
+- Canonical public test API for generic results, claims, tick context and composition records: [S1 public test API](S1-test-api.md).
 - Depends on: nothing game-specific. Phase 1 RE later fills data, never code.
 - Reimplementation, not a port (PLAN section 4 rule 0, CONVENTIONS "Reimplementation, not a
   port"): only Rugby 08's observable behaviour and numeric constants are carried over, always
@@ -39,6 +40,10 @@ All scripts are typed GDScript, follow `docs/CONVENTIONS.md`, and have `class_na
 | `game/match/replay_source_row_result.gd` | `ReplaySourceRowResult` | `RefCounted` |
 | `game/match/replay_row_begin_result.gd` | `ReplayRowBeginResult` | `RefCounted` |
 | `game/match/replay_validation_token.gd` | `ReplayValidationToken` | `RefCounted` (opaque capability) |
+| `game/match/prepared_append_token.gd` | `PreparedAppendToken` | `RefCounted` (opaque capability) |
+| `game/match/match_readiness_blocker.gd` | `MatchReadinessBlocker` | `RefCounted` |
+| `game/match/match_readiness_report.gd` | `MatchReadinessReport` | `RefCounted` |
+| `game/match/match_build_result.gd` | `MatchBuildResult` | `RefCounted` |
 | `game/match/replay_validation_authority.gd` | `ReplayValidationAuthority` | `RefCounted` (private build-owned registry) |
 | `game/match/replay_validation_result.gd` | `ReplayValidationResult` | `RefCounted` |
 | `game/match/canonical_port_readback.gd` | `CanonicalPortReadback` | `RefCounted` (codec-authored opaque identity) |
@@ -364,13 +369,15 @@ ReplayValidationToken | null, error: Error}`; success is `(true, exact_registere
 failure is `(false, null, non-OK)`. Generic S1 trusts this typed codec boundary; it accepts no
 caller boolean or arbitrary row arrays.
 
-`ReplayValidationToken` is an opaque, single-use capability. Its registry entry binds the exact
+`ReplayValidationToken._init()` is public and takes no arguments, but an ordinary caller-created
+object is inert and unregistered; only the private build-owned authority mint path creates a
+usable token. `ReplayValidationToken` is an opaque, single-use capability. Its registry entry binds the exact
 authority, sim, active `PreparedTick`, `ReplaySourceRow` identity, canonical readback identity,
 expected-output identity, generated-output identity, and successful exact comparison. The authority
 stores the registered nonce and exact token object identity. `MatchSim.finalize_replay_tick` asks its
-build-owned authority to validate and consume that exact registered token once. Forged or
-caller-constructed objects, copied fields, copied/reassembled row values, cross-sim/tick/log/index/
-row/readback/output pairings, aborted/stale receipts, and reused tokens fail. `abort_prepared_tick`
+build-owned authority to validate and consume that exact registered token once. Forged or caller-constructed objects, copied/reassembled row values, cross-sim/tick/log/index/
+row/readback/output pairings, aborted/stale receipts, and reused tokens fail. Token fields and a token
+copy/reassembly constructor are not public, so copied-token-field tests are not expressible. `abort_prepared_tick`
 invalidates any receipt registered for its handle. No usable token is returned on any failed check.
 Finalization accepts only the exact active prepared tick and its matching live token; failure does
 not finalize. Failed row validation aborts while rollback remains possible. Direct and runner-driven
@@ -424,8 +431,10 @@ or reset in place. `is_stopped()` and `stop_reason()` expose this minimal state;
 remains distinct (`is_finished()`). Invalid construction is still reported by `is_valid()` and is
 not a stopped sim.
 
-`begin_replay_row(source_row) -> ReplayRowBeginResult` captures the same complete sim and owner
-checkpoint used by `tick_checked` and opens the port owner's internal row transaction before any
+`begin_replay_row(source_row) -> ReplayRowBeginResult` first validates that the exact row carries a
+log-issued identity. An inert caller-created row returns `(false, null, ERR_INVALID_PARAMETER)`
+before checkpoint capture or opening the port transaction, with no sim or port state change. For a
+valid source row, it captures the same complete sim and owner checkpoint used by `tick_checked` and opens the port owner's internal row transaction before any
 replay command injection; it returns an active
 `PreparedTick` handle bound to that exact `ReplaySourceRow`. The result is `{ok: bool,
 prepared_tick: PreparedTick | null, error: Error}`; success is `(true, handle, OK)`, failure is
@@ -498,7 +507,8 @@ mints a substitute token.
    is fatal and makes the sim non-runnable.
 3. Build an immutable generic `SimTickContext` from copies of candidate input/commands and
    pre-tick state, including pre-tick tick and clock/flow information plus the exact rational
-   deterministic clock delta derived from actual advance (zero when the pre-tick clock is paused).
+   deterministic clock delta derived from actual advance. S1 exposes no pause API; world-pause
+   behavior is unresolved and C-51 does not assert a paused-clock case.
    Registered owners capture in stable registration order before the first system tick.
 4. Advance candidate input edges and tick count, then run systems in existing registration order.
    Systems observe the captured pre-update owner values for the full tick.
@@ -595,11 +605,14 @@ returns the first eligible transition with `(true, transition, OK)`, successful 
 transition result cannot represent checked flow failure.
 
 `MatchCondition` (`Resource`): `evaluate_checked(sim: MatchSim) -> ConditionEvaluationResult`.
-For acceptance injection, a test-only `InjectableFailureCondition` returns
-`ConditionEvaluationResult(false, false, ERR_FAILED)` when its test-controlled failure flag is
-enabled and successful false/true evaluation otherwise. It does not mutate itself while
-evaluating; the test enables it before the candidate tick. This makes failure occur during flow
-staging without adding a production condition or changing generic flow semantics.
+For acceptance injection, a test-owned fixture at
+`tests/unit/match/fixtures/injectable_failure_condition.gd` extends `MatchCondition` and has an
+explicit no-argument constructor plus `fail_enabled: bool = false`. Its
+`evaluate_checked(sim: MatchSim) -> ConditionEvaluationResult` returns
+`ConditionEvaluationResult(false, false, ERR_FAILED)` when enabled and
+`ConditionEvaluationResult(true, true, OK)` otherwise. Evaluation does not mutate the flag; the
+test enables it before the candidate tick and disables it before explicit retry. This fixture is
+not a production class or failure switch and does not change generic flow semantics.
 - `ConditionTicksInState`: `@export var ticks: int = 1`; true when `sim.flow.ticks_in_state >= ticks`.
 - `ConditionPeriodExpired`: `enum Which { ANY, LAST, NOT_LAST }`, `@export var which: Which = ANY`;
   true when `sim.clock.is_period_expired()` and (`ANY`, or `LAST` and `is_last_period()`, or
@@ -751,12 +764,14 @@ normalized immutable frame and retained command candidate from `PreparedTick`; i
 caller-supplied frame or typed command arguments. It verifies that the encoded command source-bundle
 identity matches that candidate and that the output bundle belongs to the same tick, then fully
 builds/copies the exact v3 frame/command/output row and reserves its index. `AppendPrepareResult` is
-either `PREPARED(token)` or `FAILED(error)`. The opaque `PreparedAppendToken` is minted only by
-that log through its internal minting path, is single-use, and binds the prepared-tick identity,
+either `PREPARED(token)` or `FAILED(error)`. `PreparedAppendToken._init()` is public and takes no
+arguments, but an ordinary caller-created object is inert and unregistered. The opaque token is
+minted only by that log through its internal minting path, is single-use, and binds the prepared-tick identity,
 source/encoded-command identity, candidate-frame identity, output-bundle identity, log identity,
 reserved index/generation, and exact row identity. Only the exact internally minted token object with its private registered nonce is accepted; a
-caller-created object or copied token fields cannot reproduce that capability. The log verifies all
-bindings and active reservation state on every use. `MatchSim.finalize_prepared_tick(prepared_tick, append_token)` requires the exact still-active tick and matching log token and consumes the prepared tick; `commit_append(append_token)` requires that same token to have been marked finalized by that sim. Cancelled, consumed, stale, cross-log, cross-tick, independently-created-output, or row-substituted tokens are rejected and cannot publish. All validation, encoding, row construction/copying, and allocation happen before finalization, and ordinary failures abort the tick and cancel the token while rollback remains possible. No process-termination atomicity is promised: the enforceable contract is the capability pairing in normal execution. Finalization and commit are infallible, allocation-free, callback-free, with no callbacks between them; `commit_append` only publishes the already-built row. Thus the complete row is observable before staged sim signals, EventBus relays, or runner `ticked`.
+caller-created object cannot reproduce that capability. Token fields and a token copy/reassembly
+constructor are not public. The log verifies all
+bindings and active reservation state on every use. `MatchSim.finalize_prepared_tick(prepared_tick, append_token)` requires the exact still-active tick and matching log token and consumes the prepared tick; `commit_append(append_token)` requires that same token to have been marked finalized by that sim. `finalize_prepared_tick`, `commit_append`, and `cancel_append` reject an inert caller-created token without consuming the active tick/reservation or publishing a row. Cancelled, consumed, stale, cross-log, cross-tick, independently-created-output, or row-substituted tokens are rejected and cannot publish. All validation, encoding, row construction/copying, and allocation happen before finalization, and ordinary failures abort the tick and cancel the token while rollback remains possible. No process-termination atomicity is promised: the enforceable contract is the capability pairing in normal execution. Finalization and commit are infallible, allocation-free, callback-free, with no callbacks between them; `commit_append` only publishes the already-built row. Thus the complete row is observable before staged sim signals, EventBus relays, or runner `ticked`.
 
 The runner passes `tick_checked` the frame and detached typed command bundle represented by the
 port's authoritative readback. For replay, it uses the verified canonical port readback after
@@ -777,12 +792,15 @@ has succeeded. Frame commands keep their existing meanings and canonical typed r
 container adds no command schema.
 `read_replay_row(index: int) -> ReplaySourceRowResult` returns one immutable row snapshot with
 detached frame, command, and output values plus an opaque identity capability. `ReplaySourceRow`
-has read-only copied accessors for `frame`, `command_records`, and `output_records`; its identity is
-issued only by the exact `InputLog` for that stored index, stable row generation, and full stored
-row values. Repeated reads of an unchanged row return the same internal identity. The identity is
-bound to log object identity and cannot be constructed by callers, reassembled from legacy accessor
-copies, or substituted after mutation of that indexed row; a stored-row mutation invalidates its
-issued capability. `ReplaySourceRowResult` is `{ok: bool,
+has a public no-argument `_init()` that constructs an inert, unregistered row; its copied accessors
+return `frame == null`, empty `command_records`, and empty `output_records`. A caller-created row
+has no log-issued identity and cannot be made usable by setting values or copying a capability.
+Populated rows have read-only copied accessors for `frame`, `command_records`, and `output_records`;
+their identity is issued only by the exact `InputLog` for that stored index, stable row generation,
+and full stored row values. Repeated reads of an unchanged row return the same internal identity.
+The identity is bound to log object identity and cannot be constructed by callers, reassembled from
+legacy accessor copies, or substituted after mutation of that indexed row; a stored-row mutation
+invalidates its issued capability. `ReplaySourceRowResult` is `{ok: bool,
 row: ReplaySourceRow | null, error: Error}`; an out-of-range index returns `(false, null,
 ERR_INVALID_PARAMETER)`. Replay reads logs through this read-only API. No replay path mutates the
 source log. `frame_count() -> int`, legacy `read_frame(index: int, into: InputFrame) -> bool`
@@ -874,6 +892,24 @@ and claims; runtime snapshots include advanced owner and port state. Failed-tick
 each fresh instance to its exact immediate pre-tick state. The build result owns one
 `ReplayValidationAuthority`; the builder injects that same private reference into its `MatchSim`
 and single codec, and no caller receives a mint/consume method.
+
+`MatchReadinessBlocker` is an immutable record with `code: Code`, `subject: StringName`, and
+`message: String`. Its nested `Code` enum is `MISSING_REQUIRED_INPUT`, `INVALID_CONFIGURATION`,
+`INVALID_TICK_RATE`, `UNSAFE_EXTENSION`, `PARTICIPANT_SETUP_FAILED`, and
+`PROVIDER_OWNERSHIP_FAILED`. `subject` identifies a stable input key or participant/provider
+identity when known and is empty only when no single subject applies. The diagnostic message is
+not identity or fingerprint input. `MatchReadinessReport` is the single immutable public report
+type for build blockers and replay readiness; it contains a detached
+`blockers: Array[MatchReadinessBlocker]` and `is_ready() -> bool`, true exactly when the list is
+empty.
+
+`MatchCompositionBuilder.build(request)` and `build_replay(request)` each return a positional
+immutable `MatchBuildResult` with fields in this order: `ok: bool`, `sim: MatchSim | null`,
+`codec: S2ReplayCodec | null`, `setup_fingerprint: String`,
+`readiness: MatchReadinessReport`, `error: Error`. Every result has a non-null readiness report.
+Success is `(true, non-null sim, non-null single codec, non-empty fingerprint, ready report, OK)`.
+Failure is `(false, null, null, empty fingerprint, report with one or more blockers, non-OK)`.
+The report does not replace the `error`; diagnostic message text is not fingerprinted.
 
 `static run(request: MatchCompositionRequest, log: InputLog) -> MatchReplayResult`, where
 `MatchReplayResult` contains `sim: MatchSim | null`, `error: Error`, optional typed
@@ -1264,7 +1300,7 @@ names even in comments.
   `FAILED_RETRYABLE`; no failed phase returns a signal batch, appends a log entry, or publishes a
   sim, runner, or EventBus signal. Non-restorable stateful participants/providers and unsupported
   capabilities are rejected before tick 1. Flow failure is injected by enabling the documented
-  test-only `InjectableFailureCondition` on an evaluated transition; its checked failure aborts
+  test-owned `InjectableFailureCondition` fixture from the public test seam on an evaluated transition; its checked failure aborts
   and rolls back the transaction.
 - C-47 After a recoverable runner tick failure, an explicit retry uses the exact sampled frame and
   detached command bundle without polling the source again. `_physics_process` does not retry it
@@ -1291,8 +1327,9 @@ names even in comments.
   reproduces per-tick hashes. Records contain only external typed frame commands; no generic
   per-frame owner-capture command is added.
 - C-51 The generic context/outcome provides copied immutable candidate/pre-tick data and generic
-  clock/flow/transition information, including the exact deterministic clock delta as a rational
-  derived from actual advance and zero when the pre-tick clock is paused. `TickResult` distinguishes
+  clock/flow/transition information, including the exact deterministic advancing clock delta as a
+  rational derived from actual advance. The test covers the advancing tick only; S1 exposes no
+  pause API, and world-pause behavior remains unresolved. `TickResult` distinguishes
   prepared, committed, invalid/finished/stopped no-op, recoverable failure, and fatal rollback; its
   staged typed signal batch exists on prepared/committed results only. Extra-time behavior, world-pause behavior, and
   clock/replay migration policy remain unresolved; S1 adds no policy.
@@ -1339,7 +1376,7 @@ names even in comments.
 - C-57 An invalidly constructed sim returns `NO_OP_INVALID` with `ERR_INVALID_PARAMETER`, null
   outcome and empty signal batch on `tick_checked`; no capture, tick, mutation or publication
   occurs. Its result is distinct from `NO_OP_STOPPED` and `NO_OP_FINISHED`.
-- C-58 A flow transition whose test-only `InjectableFailureCondition` returns a checked error
+- C-58 A flow transition whose test-owned `InjectableFailureCondition` fixture returns a checked error
   aborts flow staging. Successful rollback restores the full pre-tick state and returns
   `FAILED_RETRYABLE` with no outcome/batch, log append or publication; retrying after disabling
   the condition commits the exact candidate once.
@@ -1406,7 +1443,7 @@ names even in comments.
   record, and sequence order. During live recording, observe the committed complete row from a
   signal relay and from `ticked`; both see the row before publication. Output encoding/validation
   and copying/building the full row happen while the tick remains abortable. Inject codec output
-  encode/validation failure and full-row preparation/allocation failure before finalization: each
+  encode/validation failure and a checked row-preparation validation failure before finalization: each
   aborts/restores the tick, cancels its row token, exposes no row/output/signal, and explicit retry
   uses the exact candidate without source repoll or duplicate enqueue/sequence assignment. Reject a
   token paired with another tick, an independently created output bundle, or a reused/cancelled
@@ -1471,14 +1508,21 @@ names even in comments.
   fatal rollback latches sim and runner terminal and every later step refuses retry.
 - C-75 `InputLog.read_replay_row(index)` issues a detached typed frame/command/output snapshot and
   opaque capability bound to that log object, index, stable row generation, and complete row;
-  unchanged rereads share internal identity. Reject out-of-range indexes, caller-constructed or
-  reassembled rows, changed/mutated source rows, and substitutions after source-log mutation. One
-  build-owned `ReplayValidationAuthority` is shared by that build's sim and codec. Only the codec's
-  private mint path registers a nonce and exact token object after all validation succeeds; failed
-  checks return no usable token. Verify copied token fields/object identities fail, abort invalidates
-  a registered token, cross-sim/tick/log/index/row/readback/expected-output/generated-output
-  pairings fail, and exact tokens consume once. Force validation failure after new-command injection
-  and assert abort restores the exact pre-row pending queue and next sequence. A valid matching token
+  unchanged rereads share internal identity. The explicit caller-created-row case uses only the
+  public `ReplaySourceRow.new()` no-argument constructor, which yields an inert row with null frame,
+  empty command/output arrays, and no log-issued identity. `MatchSim.begin_replay_row` rejects it as
+  `(false, null, ERR_INVALID_PARAMETER)` before checkpoint capture or port transaction, with no
+  state change. Also reject out-of-range indexes, reassembled rows, changed/mutated source rows,
+  and substitutions after source-log mutation. One build-owned `ReplayValidationAuthority` is shared
+  by that build's sim and codec. Only the codec's private mint path registers a nonce and exact token
+  object after all validation succeeds; failed checks return no usable token. Verify an inert
+  public no-argument `ReplayValidationToken.new()` is rejected without finalization; do not test
+  copying/reassembling token fields because no token fields or copy constructor are public. Bind the
+  exact internally minted token against wrong sim/tick/log/index/row/readback/expected-output/
+  generated-output identities and require rejection without consuming its valid binding; then the
+  exact correct pairing consumes once. Abort invalidates a registered token. Force validation
+  failure after new-command injection and assert abort restores the exact pre-row pending queue and
+  next sequence. A valid matching token
   finalizes the active tick
   once. Force generated-output mismatch and assert rollback-capable abort with no publication,
   accepted result, or source-log mutation. Direct and runner replay publish only after
