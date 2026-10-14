@@ -6,6 +6,7 @@
 .omc/
 /original
 /extracted/
+/extracted-pipeline/
 /build/
 .idea/
 
