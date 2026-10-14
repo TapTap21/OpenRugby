@@ -8,10 +8,10 @@ the SecuROM-repaired unpacked image `Rugby08_unpacked.exe` (sha256
 (`ev_…`, prefixes shown) are cited where an REA record exists. `LOCAL:<addr>`
 marks claims read from the offline disassembly with SecuROM trampolines
 inlined (`.omc/research/rules/funcasm.py`, `rules/rd.py`). This file contains
-no game code. The REA import requested for this completion pass was blocked by
-the client approval gate (`MCP tool call requires approval, but approval policy
-is never`); citations here are inherited from the checkpoint notes, with no new
-binary analysis performed in this pass.
+no game code. A focused REA confirmation pass was completed against the repaired
+target with Ghidra 12.1.4. New REA Evidence IDs are cited in Q and N below.
+The analysis is static: it confirms code and data relationships, not in-game
+execution. Unresolved paths and indirect dispatch remain explicitly bounded.
 
 **Boundaries.** The rules lead decides when a set piece is awarded and what
 an infringement costs. The physics lead owns ball flight and tackle contact.
@@ -102,7 +102,7 @@ Acceptance tests: T. Open questions: Q. Confidence: Z.
 | 0x659f00 | setpiece_RuckDoTurnover | performs a turnover | LOCAL:0x659f00 |
 | 0x6175f0 | setpiece_RuckCpuHandsChance | CPU "hands" probability (AI-owned table) | LOCAL:0x6175f0 |
 | 0x664f20 | setpiece_FieldZone | field zone of a point for a team | LOCAL:0x664f20 |
-| 0x660eb0 | setpiece_RuckDecisionLogicLoad | loads `config/ruckdecisionlogic.xml` (unused, see R.6) | LOCAL:0x660eb0 |
+| 0x660eb0 | setpiece_RuckDecisionLogicLoad | loads and parses `config/ruckdecisionlogic.xml`; query use unresolved (see R.7) | LOCAL:0x660eb0 |
 
 Classes (RTTI): `CRugbyRuck` (vtable 0x8ea884, 30 slots), `CRuckTeam`
 (0x8eaf7c, one per side), `CRuckChooser`, `RuckScrumHalf`,
@@ -241,18 +241,21 @@ option, name unknown).
   (minute < 20, < 65, < 80, later) and score situation (values 5–60 %),
   plus about 2 % per forward with Discipline < 80 and +5 % for three
   specific player IDs (`0x6175f0`, partially decoded; AI-owned).
-- Attacking side: help text says the ball is released automatically "after
-  a while" and holding `$RUCK_CHEAT` delays release, with a referee penalty
-  if held too long. The release timer was **not located** (unknown).
+- Attacking side: help text describes automatic release "after a while",
+  holding `$RUCK_CHEAT` to delay release, and a referee penalty if held too
+  long. This is help-text evidence only; these are not confirmed runtime rules.
+  The release timer remains unknown.
 
-### R.7 Unused data
+### R.7 Data and query accessors
 
 `config/ruckdecisionlogic.xml` (per difficulty club/pro/elite, per
 player class and field zone, probability ranges of a "binding intensity"
-10–110) is loaded at boot, but none of its query functions is referenced
-anywhere in the image (observed absence; recorded as unknown
-`unk_5f410ab6…`). Treat it as dead data: ship it as an optional mod table,
-do not drive behaviour from it.
+10–110) is loaded and parsed at boot (see R.1). Separately, the three
+specifically inspected query/accessor routines had no **resolved direct
+callers** in this static check. This does not establish whether they are used
+through indirect dispatch or at runtime; that remains unknown
+(`unk_c194…`). Do not exclude this data from behavior. Any implementation
+guidance about its runtime use is provisional until those paths are resolved.
 
 ## S. Scrum
 
@@ -1069,7 +1072,8 @@ stateDiagram-v2
 ## C. Constants and tunables (Resource fields)
 
 Data-driven values (already in shipped XML) are listed in S.3 (scrum), K.2
-(goal kick, drop goal, kicker classes) and R.7 (ruck decision logic, unused).
+(goal kick, drop goal, kicker classes) and R.7 (ruck decision logic; query use
+unresolved).
 The table lists **hard-coded** constants that the rebuild should expose as
 `Resource` fields.
 
@@ -1252,27 +1256,27 @@ Kicks:
 
 ## Q. Open questions and unknowns
 
-| Question | Unknown / Evidence |
-|---|---|
-| Meaning of tackle-record bytes +0x28/+0x29, carrier check `0x60be00`, team +0x124 (players lead: probably team tactic byte +0x58, 0..10, unverified) | unk_e8952913… |
-| Is ruckdecisionlogic.xml really never used at runtime | unk_5f410ab6… |
-| Goal-kick red-zone factor below 1 (intended?) | unk_f6a73ff9… |
-| Scrum rotate callers, consumers of ROTATE_TOO_FAR / ILLEGAL_ROTATE, No.8 pick-up and scrum-half option choice | unk_725baa59… |
-| Human kick-off/drop-out power, penalty menu timeout, quick-tap window and "too close" distance | unk_351f46b4… |
-| Maul formation, exits, CPU pass vs drive, scrum awarded after collapse | unk_b26b385f… |
-| Line-out: owner+4 post-catch branch, maul predicate 0x644560, ground-ball consequence, referee leniency range | unk_8f2d6e98… (line-out sweeper) |
-| Ruck: auto ball-release timer and `$RUCK_CHEAT` hold for the attacking side; referee "holding on" limit | not located |
-| Scrum push result semantics (which side gains ground) and how the ball moves to the No.8s | inferred only |
-| Non-natural hooker rule (0x66cbc0) | not decoded |
-| Kick-off variant animations and CPU kick-off target table | partly decoded |
+The confirmation pass used static REA analysis of the shared repaired image. Every row separates what was observed from interpretation and what still needs a direct path or runtime check.
+
+| Topic | Observed | Inferred | Unknown / Evidence |
+|---|---|---|---|
+| Ruck release, attacking-side `RUCK_CHEAT`, holding on | The inspected ruck input path handles the human defending-side `0x2000` action and a CPU decision path. Literal searches find the `RUCK_CHEAT` control/event labels, but no reference to the `GEVENT_RUCK_CHEAT` label. | The analyzed cheat handler does not establish an attacking-side hold-to-delay rule or an automatic release timer. | Release timing and referee holding-on limit remain unknown; literal search coverage does not exclude numeric or indirect event dispatch. **Evidence:** `ev_dc2c6cda4b4e07178d82caf248241128eea9a4beacaa00af8d17a8ac6afc2a89`, `ev_f0ec2ba9a0e5dacc1a33646acf82cf5c191d91aeb0a3b89bd167077c134d7ab2`, `ev_070c80f406f3dbb7f73eed8506d8ce3b5439fd23aa5d4a9364588d45c087df35`. Unknown: `unk_1a583179f124034edf74be9ad166d13fefee9f05ff96a0e9aabe3f088d66902f`. |
+| Scrum rotation and events | Ghidra returned no resolved direct callers for the rotate and unrotate entries. A literal search finds the `ROTATE_TOO_FAR` event and a handler-text string reference; `ILLEGAL_ROTATE` has no literal references in this search. | Rotation may be driven through indirect/event dispatch, which the direct-call and literal-string views do not resolve. | Caller/input paths and event consumers remain unknown. The scrum-half update is a multi-state routine; `NUMBER8_PICKUP` clip strings are referenced by a separate function, while `SCRUM_PICKUP` event strings occur in a relocated routine. These facts do not recover the No.8 choice or scrum-half run/pass/kick decision. **Evidence:** `ev_b7b72a05a98a02f85194732dc5516b741a40b821aea2c5f02cca718672be2c0a`, `ev_17552e6d90b382bb11f7af72a656af8b31d55030bca40426890f1f7a70bc61e3`, `ev_2b898ece294441b398dd9ee1722852af8d6ad6a1e051be01afbd8b34ea9427e3`, `ev_decaf801e784e2bb3bcb3ac5e75c5c6302d5cc1d6107a3c544b3b41f5c35b7fc`, `ev_940e709821d9008b3f226fbc29d69c19cf34459721473479d760a99f7f4e205f`, `ev_bfc0760fb0b84e98b391e3e52e9ba22e62d00067853e1b1e544b3fe836f68006`, `ev_b1463de4f0757689eed4f087d2e51c63d381bf34e840ff772c04a96128be4fa6`, `ev_1d1f7df4b05c286a95b7bb2e8927369cc7d22921e5054da8f39df1304898a22e`. Unknown: `unk_e9644bbd24631e5e99fabe0f81b0ea578df8b1c6a2d23d47db2d00e50d4d8c66`. |
+| Line-out catch ownership and referee range | Catch handling records the catching side, then branches on an owner value: values 1 and 2 select separate follow-up states; other values enter the ordinary catch state. The maul-option predicate requires a valid catcher/owner context and checks player/group fields. The leniency setter stores one byte; its direct caller is at `0x47beee`. | Those branches are behavior gates, but the owner value and predicate inputs do not disclose their rugby meaning by themselves. | Owner-value semantics, the exact maul condition, ground-ball possession consequence, and random bounds for referee leniency remain unknown. **Evidence:** `ev_3fe7ca7489c1fe4e3dd2aaf22d7b2f7aad1ed218bf511881d9af65f9b1019718`, `ev_319de22f3b7f3af811234af162df1d62612a8f2b09a02123fe77313297f3f799`, `ev_0872df8c183e35758ebcc54ab037fbc6fc46a8ee528773d56e4b0b998a1a32c4`, `ev_e466eef23016d974f81f5cdd22322e67d2522184a8644962d2d426e2479dfafb`. Unknown: `unk_875e581f5f82fe255c46ce39e3c78f60049cfd0195e1c584d9167b830c4af04a`. |
+| Maul formation, exits, collapse restart | The maul update invokes collapse handling, and both the main update and team-update paths resolve through the collapse entry. The inspected update also runs drive-speed and team-input/update paths. | This establishes a collapse transition inside maul processing, not the restart decision after collapse. | Formation trigger, CPU pass-versus-drive choice, exit variants, collapse cause mapping, and which side receives the scrum remain unknown. **Evidence:** `ev_e19816e058fbc437031289997116bfaf388a2ef642aafee2b6eb768e5b45d737`, `ev_2a66a9c34b80852edb607b5ef9e1071697e0fd98e93e16f4f145a046d5d55f35`, `ev_0ac4a56ef196b98687a7fc994066b77115407fe879848c1b8a85ce90475d9864`, `ev_8f39da80758161693b5d11e334c09d0b5967aa3595a5bb358bad7d9328f5555b`. Unknown: `unk_ada45768392ded4269ac6f6c69b513bd98cfb8ba4e61d7455ee9c68e33ef398d`. |
+| Restart power, kick targets, quick tap, penalty menu | Human restart aim calls the shared kick gauge advance unless its power-control flag is set; gauge advance adds `dt × stored_rate`; a threshold warning path resets the gauge to 1.0, while the referenced threshold value was not recovered in this view. Kick-off setup selects a designated kicker. Quick-run setup checks a “too close to defence” gate and a valid-player result; this does not establish quick-tap eligibility. Quick-penalty setup derives a delay from a remaining-time value and applies a lower-bound branch, but the referenced numeric bounds were not recovered in this REA view. | The shared gauge path suggests a restart power meter, but does not identify the rate source for kick-off/drop-out or a target table. | Human restart power rate and target table, exact quick-tap window/distance, and human penalty-menu timeout remain unresolved. **Evidence:** `ev_3347e062314c23e31cd5050e21eaaf9b8763adebbfa03d2a2dedd09904b0d757`, `ev_abb5d0dda4125286bc07cd323bddfd9b4fd05f9ab8b681be1ce6aba3265e0d65`, `ev_68d5ec8bf084e08148e0fbcfb8346eff4c6a672745615deb72ae1ab72f7bb0f4`, `ev_14846bf0926519cb6df38c85480cec91b8eb375380794afd672360b6bb6b0917`, `ev_d7d9d9162901a038cecd94cfb34eaaf39ae8c07470ebaaa49c96d2cd05b8a71b`, `ev_33e2b1891fe0746b6ab0d03074125e4eabe3c433e1ffbd71b3995c6a33e18ae9`, `ev_45d8c5cd48b404a8346e4a7c4b7e2a3d6e622a531e611ebee83ffda204ba20f5`. Unknown: `unk_9c11b247e68aba5df3604dc284c3a26c08691ee2de871eef49deab642c00de02`. |
+| Ruck XML and tackle/player record fields | The ruck decision XML loader builds a config path and invokes the parser. The three specifically inspected query/accessor routines had no resolved direct callers in the focused static check. | The load/parse path and query/accessor call findings are separate; direct-call results do not resolve indirect or runtime use. | Whether the ruck decision values are consumed indirectly or at runtime remains unknown. The cited tackle-record bytes and player/team fields were not traced in this pass. **Evidence:** `ev_8c0ade5feedd0cb4c80ee7b175806bf61794e54eaa0ef91408a1f88e71aacf0d`, `ev_921fe2efd664802b55f932d5831073f42c72173199eb75dea1fd7b4fdb8d1dd4`, `ev_08c1174084f20d4ad58fd13ada85ac42c7ced8003e8d432a053b4f393c8274a0`, `ev_98928fa929c4e0b2288fb1c7f65f8a34d56d842fb7dcc8a1dc10d0ce996e1be9`, `ev_1e4aeae2fa11b474115972c313def7ff199b9f4278ec5ea42229fa2aeadb131a`. Unknown: `unk_c1947521b001ed94760c54a74cfa49ab69ca4e7142a3f7fbc2e3fdc9e94e15bf`, plus prior record `unk_e8952913…`. |
 
 ## N. Not covered
 
-The drop-goal target zone sizing, receiving contests for kick-offs, set
-plays launched from rucks and scrums (`xml/setplays/*.xml`: per-play
-cpurange/humanrange and fly-half offsets, AI-lead territory), referee
-sanctions (rules lead), ball flight (physics lead) and all animation
-blending details.
+The following are explicit coverage limits for this pass; “not covered” does not mean absent from the game.
+
+- **Drop-goal target-zone sizing:** not inspected here. The restart gauge evidence only covers the shared power-meter update (`ev_3347e062314c23e31cd5050e21eaaf9b8763adebbfa03d2a2dedd09904b0d757`).
+- **Receiving contests for kick-offs:** kick-off setup selects a designated kicker, but this pass did not follow the receiving side or resolve a catch/contest path (`ev_68d5ec8bf084e08148e0fbcfb8346eff4c6a672745615deb72ae1ab72f7bb0f4`). Receiver behavior remains unknown.
+- **Set plays launched from rucks and scrums:** not traced from the XML records to launch behavior in this pass. No runtime-use conclusion is made; the relevant ruck data loader was only checked for direct query callers (`ev_8c0ade5feedd0cb4c80ee7b175806bf61794e54eaa0ef91408a1f88e71aacf0d`, `ev_08c1174084f20d4ad58fd13ada85ac42c7ced8003e8d432a053b4f393c8274a0`, `ev_98928fa929c4e0b2288fb1c7f65f8a34d56d842fb7dcc8a1dc10d0ce996e1be9`, `ev_1e4aeae2fa11b474115972c313def7ff199b9f4278ec5ea42229fa2aeadb131a`).
+- **Referee sanctions:** this pass followed only selected set-piece/referee links; the wider sanction outcomes remain with the rules spec (`ev_881393c2d4357949c4b6775462acdc8786d2ea0e9a263f8a8c7c16ac4d7d5a96`).
+- **Ball flight:** not analyzed here; the kick evidence cited above covers meter accumulation only, not launch or trajectory (`ev_3347e062314c23e31cd5050e21eaaf9b8763adebbfa03d2a2dedd09904b0d757`).
+- **Animation blending:** no broad blending review was performed; the scrum-half and maul reads were limited to state/update paths (`ev_940e709821d9008b3f226fbc29d69c19cf34459721473479d760a99f7f4e205f`, `ev_e19816e058fbc437031289997116bfaf388a2ef642aafee2b6eb768e5b45d737`).
 
 ## Z. Confidence summary
 
@@ -1285,9 +1289,7 @@ blending details.
   collapse triggers; maul power, drain and collapse; line-out reach
   geometry, CPU defence; kicker designations; quick line-out and quick tap
   gates.
-- **Low or unknown**: scrum outcome semantics after the push, wheel
-  consequences, No.8 and scrum-half options; maul formation and exits;
-  human kick-off power; ruck ball release; ruck tackle-context fields.
+- **Low or unknown**: scrum outcome semantics after the push, rotation consumers, No.8 and scrum-half options; maul formation and exits; kick-off/drop-out power and target tables; quick-tap and penalty-menu timing; ruck ball release; ruck tackle-context fields. This pass adds static REA evidence for the state/input boundaries, but does not resolve the listed outcomes.
 
 ## Appendix: files
 
