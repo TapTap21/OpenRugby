@@ -124,3 +124,14 @@ Handlers connected in code are named `_on_<source>_<signal>`, e.g. `_on_ball_pos
       Linux, Windows and macOS with the pinned engine version.
 - [ ] One ADR per irreversible decision in `docs/adr/`.
 - [ ] No original assets, binaries or decompiled code in git.
+
+## Reimplementation, not a port
+
+- [ ] Names describe intent in this codebase (`TackleResolver`, `AdvantageTracker`),
+      never the original's (`Hbs::Rugby::...`, RTTI or symbol names from `docs/re/`).
+- [ ] Structure follows Godot best practice and these conventions, not the original's
+      class hierarchy, globals, update order or memory layout. Rearchitect freely.
+- [ ] Only observable behaviour and numeric constants are carried over from `docs/re/`,
+      and every carried constant lives in a Resource with a clear name and unit.
+- [ ] Reviewers reject code that transliterates decompiler output or mirrors original structure.
+
