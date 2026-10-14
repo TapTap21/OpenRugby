@@ -310,9 +310,9 @@ def parse_player(rec: bytes, slot: int = 0) -> Player | None:
         positions=[POSITIONS[c] for c in codes if 0 < c < len(POSITIONS)],
         position_codes=codes,
         height_in=height_in,
-        height_cm=round(height_in * 2.54),
+        height_cm=height_in * 254 // 100,  # truncated, as the developer dump shows
         weight_lb=weight_lb,
-        weight_kg=round(weight_lb * 0.45359237),
+        weight_kg=int(weight_lb * 0.454545),  # dump factor (lb / 2.2, float32), truncated
         nationalities=[n for i, n in enumerate(NATION_BITS) if nat >> i & 1],
         nationality_mask=nat,
         birth_year=1900 + rec[P_BIRTH_YEAR],
@@ -336,6 +336,9 @@ def parse_player(rec: bytes, slot: int = 0) -> Player | None:
             "b5e": rec[0x5E],
             "b5f": rec[0x5F],
             "reserved_33_35": rec[0x33] | rec[0x34] << 8 | rec[0x35] << 16,
+            # Raw 16-byte name field: the shipped data keeps stale bytes after the NUL
+            # and some names end in a space, neither of which survive decoding.
+            "name_raw": int.from_bytes(rec[P_NAME : P_NAME + 16], "little"),
         },
         slot=slot,
     )
@@ -390,8 +393,13 @@ def build_player_record(p: Player) -> bytes:
     """Inverse of parse_player for the decoded fields (unknown bytes from p.unknown)."""
     rec = bytearray(PLAYER_SIZE)
     struct.pack_into("<HH", rec, 0, p.id, p.commentary_name_id)
-    name = p.name.encode("cp1252")[:15]
-    rec[P_NAME : P_NAME + len(name)] = name
+    raw = p.unknown.get("name_raw")
+    raw_name = raw.to_bytes(16, "little") if raw is not None else None
+    if raw_name is not None and _cstr(raw_name).rstrip() == p.name:
+        rec[P_NAME : P_NAME + 16] = raw_name  # unchanged name: keep the original padding
+    else:
+        name = p.name.encode("cp1252")[:15]
+        rec[P_NAME : P_NAME + len(name)] = name
     c = (p.position_codes + [0, 0, 0])[:3]
     rec[P_POS12] = (c[0] & 0x0F) | (c[1] & 0x0F) << 4
     rec[P_POS3] = c[2]
@@ -410,6 +418,8 @@ def build_player_record(p: Player) -> bytes:
     struct.pack_into("<H", rec, P_HEAD, p.head_id)
     for k, o in (("b56", 0x56), ("b57", 0x57), ("b58", 0x58), ("b59", 0x59)):
         rec[o] = p.unknown.get(k, 0)
+    res = p.unknown.get("reserved_33_35", 0)
+    rec[0x33:0x36] = (res & 0xFFFFFF).to_bytes(3, "little")
     for k, o in (("b5c", 0x5C), ("b5d", 0x5D), ("b5e", 0x5E), ("b5f", 0x5F)):
         rec[o] = p.unknown.get(k, 0)
     return bytes(rec)
@@ -630,6 +640,7 @@ RATING_SCALE = {
 }
 RATING_ABILITY_BONUS = {
     "BallWinner": 20,
+    "Command": 20,  # LOCAL:0x5b22f4 adds 20 for byte 0x54 bit 0
     "CrashBall": 10,
     "DefensiveOrganisation": 10,
     "GoalKicker": 35,
@@ -642,6 +653,43 @@ RATING_ABILITY_BONUS = {
     "Tackling": 10,
     "TacticalKicking": 10,
 }
+# Static 30-entry player-id list at 0x993508 (.data of the unpacked exe). Listed players skip
+# the key-stat multiplier in players_CalcMarketRating and always get market value 1 from
+# players_CalcMarketValue (both check the list unconditionally, before anything else).
+UNRATED_PLAYER_IDS: frozenset[int] = frozenset(
+    {
+        26809,
+        22361,
+        5602,
+        7864,
+        20528,
+        19964,
+        8826,
+        12290,
+        31923,
+        29087,
+        3925,
+        27663,
+        23146,
+        29309,
+        11662,
+        475,
+        26946,
+        16336,
+        30524,
+        18392,
+        20448,
+        14333,
+        10910,
+        229,
+        28962,
+        12570,
+        24515,
+        9464,
+        1278,
+        17469,
+    }
+)
 # (key stat, first value, table, value above table or None, threshold above which it applies)
 _KEY_TABLES: dict[str, tuple[str, int, tuple[float, ...], float | None, int]] = {
     "scrum_half": (
@@ -714,6 +762,8 @@ def market_rating(p: Player) -> int:
         v = p.weight_lb - 100 if k == "w" else p.height_in - 60 if k == "h" else a.get(k, 0)
         total += wgt * v
     total += sum(RATING_ABILITY_BONUS.get(s, 0) for s in p.abilities)
+    if p.id in UNRATED_PLAYER_IDS:
+        return int(total * RATING_SCALE[group])
     mult = 1.0
     key = _KEY_TABLES.get(group)
     if key is not None:
@@ -726,8 +776,10 @@ def market_rating(p: Player) -> int:
     return int(total * RATING_SCALE[group] * mult)
 
 
-def market_value(rating: int) -> int:
+def market_value(rating: int, player_id: int | None = None) -> int:
     """players_CalcMarketValue band (1..41) for a market rating."""
+    if player_id in UNRATED_PLAYER_IDS:
+        return 1
     for limit, value in ((16, 1), (18, 2), (20, 3), (23, 4), (26, 5), (28, 6), (31, 7), (33, 8)):
         if rating < limit:
             return value
@@ -960,7 +1012,7 @@ def build_database(src: Path) -> dict[str, Any]:
         d = asdict(p)
         d["teams"] = member_of.get(p.id, [])
         d["market_rating"] = market_rating(p)
-        d["market_value"] = market_value(d["market_rating"])
+        d["market_value"] = market_value(d["market_rating"], p.id)
         pl.append(d)
     stadiums = parse_stadiums(_member(src, STADIUMS_MEMBER), strings)
     try:
@@ -972,9 +1024,10 @@ def build_database(src: Path) -> dict[str, Any]:
     except FileNotFoundError:
         render_cfg = []
     comps = []
-    for f in sorted(src.glob("*.rsg.unpacked")):
-        c = parse_rsg(f.read_bytes())
-        c["member"] = f.name.removesuffix(".unpacked")
+    rsg_names = {f.name.removesuffix(".unpacked") for f in src.glob("*.rsg*")}
+    for name in sorted(n for n in rsg_names if n.endswith(".rsg")):
+        c = parse_rsg(_member(src, name))
+        c["member"] = name
         comps.append(c)
     return {
         "players": pl,

@@ -152,7 +152,7 @@ $$R = \mathrm{trunc}\Big(\big(\textstyle\sum_i w_{pos,i}\, stat_i + \sum_{abilit
   | TacticalKicking | +10 |
   | Scrummager | +5 |
   | TackleBreaker | +5 |
-  | Command | 0 |
+  | Command | +20 |
 
 - **Key-stat multiplier $M$.** Forwards use 1. For backs a table is indexed by a key stat:
   - SH: key stat Passing; table covers 71..90; above 90, M = 2.0.
@@ -161,7 +161,7 @@ $$R = \mathrm{trunc}\Big(\big(\textstyle\sum_i w_{pos,i}\, stat_i + \sum_{abilit
   - CE: key stat Speed; table covers 85..100.
   - FB: key stat floor((Kicking+Speed)/2); table covers 71..85; above 85, M = 1.7.
 - **Exceptions:**
-  - A player whose id is in a 30-entry runtime list at 0x993508 skips $M$. The purpose of that list is unknown.
+  - A player whose id is in the 30-entry static list at 0x993508 skips $M$ (`rosterdb.UNRATED_PLAYER_IDS`; all 30 are low-rated roster players). players_CalcMarketValue checks the same list first and returns 1. The purpose of the list is unknown.
   - A 20-entry career override list (career +0xdc4, stride 12) replaces R outright.
   - Position 0 returns 0.
 - **Shipped range.** R runs from 10 to 157.
@@ -299,7 +299,7 @@ Engine stat index (getter 0x6558b0):
 | 0x3c | u32 | team_id | Equals the slot index |
 | 0x40 | u16 x7 | roles | Slot 0 = captain [O] (Pichot, Gregan, Vickery, Umaga). Slot 1 = vice-captain [I] (McCaw for NZ). Slots 2-6 = long goal kicker, short goal kicker, long punter, short punter, kick-off taker [I] (Designations enum order). |
 | 0x4e | u8 x10 | ratings 0..100 | Labels [I] from UI strings 112-121: Attacking, Defending, Scrummaging, Line-outs, Loose, Kicking, Technique, Stamina, Flair, Overall. Placeholder teams have all 5s. |
-| 0x58 | u8 x8 | tactics | [U]. Ranges: 0..10, 0..2, 0..1, 0..5 (engine stores 6-x), then four 0..13 bytes restored from the profile (set-play assignments [I]). |
+| 0x58 | u8 x8 | tactics | [U]. Exported raw as stored in the file (the loader's 6-x on +0x5b is NOT applied, and build_rdf writes the raw value back). Ranges: 0..10, 0..2, 0..1, 0..5 (engine stores 6-x), then four 0..13 bytes restored from the profile (set-play assignments [I]). |
 | 0x60 | u8 | home_stadium | Stadium id (stadium XML Index). 0 = none. |
 | 0x61..0x67 | - | zero | |
 
@@ -334,7 +334,7 @@ Engine stat index (getter 0x6558b0):
 1. Loading a DB whose version u32 has byte 1 != 0x0D logs a version error.
 2. The player record for id 28321 decodes to:
    - name "A.Pichot^", Scrum Half;
-   - 175 cm (69 in), 78 kg (171 lb);
+   - 175 cm (69 in), 77 kg (171 lb) (the dump truncates: cm = int(in x 2.54), kg = int(lb x 0.454545));
    - born 1974-08-22;
    - Passing 94, KickingPower 82;
    - abilities {Passer, Playmaker, DefensiveOrganisation}, InjuryResistance 2.

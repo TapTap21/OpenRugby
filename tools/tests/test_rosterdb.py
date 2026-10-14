@@ -1,5 +1,6 @@
 import json
 import struct
+from pathlib import Path
 
 import pytest
 
@@ -22,7 +23,7 @@ def _player(pid: int = 28321, name: str = "A.Test^") -> Player:
         height_in=69,
         height_cm=175,
         weight_lb=171,
-        weight_kg=78,
+        weight_kg=77,
         nationalities=["Argentina", "Italy"],
         nationality_mask=(1 << 0) | (1 << 9),
         birth_year=1974,
@@ -77,7 +78,7 @@ def test_player_roundtrip():
     assert q.attributes == p.attributes
     assert q.abilities == ["Passer", "BallWinner", "Jumper"]
     assert q.injury_resistance == 3 and q.player_type == "Passer"
-    assert q.height_cm == 175 and q.weight_kg == 78
+    assert q.height_cm == 175 and q.weight_kg == 77
 
 
 def test_engine_stat_order_matches_getter():
@@ -221,3 +222,82 @@ def test_market_rating_scrum_half():
     assert rosterdb.market_rating(p) == int((0.33 * 75 + 15) * 0.4 * 1.3)
     p.position_codes = [0, 0, 0]
     assert rosterdb.market_rating(p) == 0
+
+
+def test_height_weight_conversions_truncate_like_the_dev_dump():
+    # developer roster dump (453779c3): 72in/182cm, 77in/195cm, 171lb/77kg, 237lb/107kg, 165lb/74kg
+    for inches, cm in ((72, 182), (77, 195), (69, 175)):
+        p = _player()
+        p.height_in = inches
+        q = rosterdb.parse_player(rosterdb.build_player_record(p))
+        assert q is not None and q.height_cm == cm
+    for lb, kg in ((171, 77), (237, 107), (165, 74), (243, 110), (251, 114)):
+        p = _player()
+        p.weight_lb = lb
+        q = rosterdb.parse_player(rosterdb.build_player_record(p))
+        assert q is not None and q.weight_kg == kg
+
+
+def test_player_record_preserves_name_padding_and_reserved_bytes():
+    rec = bytearray(rosterdb.build_player_record(_player(name="E.Miller")))
+    rec[4 + 9 : 4 + 10] = b"y"  # stale byte after the NUL, as in the shipped file
+    rec[0x33:0x36] = b"\x01\x02\x03"
+    p = rosterdb.parse_player(bytes(rec))
+    assert p is not None and p.name == "E.Miller"
+    assert rosterdb.build_player_record(p) == bytes(rec)
+    spaced = bytearray(rec)
+    spaced[4:20] = b"A.Russell \0\0\0\0\0\0"  # trailing space is part of the stored name
+    q = rosterdb.parse_player(bytes(spaced))
+    assert q is not None and rosterdb.build_player_record(q) == bytes(spaced)
+    q.name = "B.New"  # an edited name must not resurrect the old padding
+    assert rosterdb.build_player_record(q)[4:20] == b"B.New" + bytes(11)
+
+
+def test_market_rating_command_bonus_and_unrated_ids():
+    p = _player()
+    p.position_codes = [8, 0, 0]
+    p.attributes = dict.fromkeys(p.attributes, 0)
+    p.attributes["passing"] = 71  # table index 0 -> multiplier 1.0
+    p.abilities = []
+    base = rosterdb.market_rating(p)
+    p.abilities = ["Command"]  # +20 in the engine (0x5b22f4)
+    assert rosterdb.market_rating(p) == int((0.33 * 71 + 20) * 0.4)
+    assert rosterdb.market_rating(p) > base
+    p.attributes["passing"] = 91
+    p.abilities = []
+    mult = rosterdb.market_rating(p)
+    p.id = next(iter(rosterdb.UNRATED_PLAYER_IDS))
+    assert rosterdb.market_rating(p) == int(0.33 * 91 * 0.4) < mult  # key multiplier skipped
+    assert rosterdb.market_value(99, p.id) == 1  # value list check comes first
+    assert rosterdb.market_value(99) == 41
+
+
+def test_export_includes_rsg_without_unpacked_sibling(tmp_path):
+    src = tmp_path / "gob"
+    src.mkdir()
+    (src / f"{rosterdb.RDF_MEMBER}.unpacked").write_bytes(rosterdb.build_rdf([], []))
+    (src / f"{rosterdb.TEAMS_MEMBER}").write_bytes(b"<hbstool><Project/></hbstool>")
+    (src / f"{rosterdb.KITS_HEADS_MEMBER}").write_bytes(b"<config/>")
+    (src / f"{rosterdb.STADIUMS_MEMBER}").write_bytes(b"<hbstool><Project/></hbstool>")
+    xml = b'<hbtool><tournament name="Plain" rounds="0"></tournament></hbtool>'
+    (src / "aaaa.rsg").write_bytes(xml)
+    (src / "bbbb.rsg").write_bytes(b"compressed")
+    (src / "bbbb.rsg.unpacked").write_bytes(xml.replace(b"Plain", b"Unpacked"))
+    comps = rosterdb.build_database(src)["competitions"]
+    assert [(c["member"], c["name"]) for c in comps] == [
+        ("aaaa.rsg", "Plain"),
+        ("bbbb.rsg", "Unpacked"),
+    ]
+
+
+_REAL_GOB = Path(__file__).resolve().parents[2] / "extracted" / "data.gob"
+
+
+@pytest.mark.skipif(
+    not (_REAL_GOB / f"{rosterdb.RDF_MEMBER}.unpacked").is_file(), reason="extracted data absent"
+)
+def test_real_rdf_roundtrips_byte_for_byte():
+    data = rosterdb._member(_REAL_GOB, rosterdb.RDF_MEMBER)
+    players, teams = rosterdb.parse_rdf(data)
+    assert rosterdb.build_rdf(players, teams) == data
+    assert (len(players), len(teams)) == (1904, 120)
