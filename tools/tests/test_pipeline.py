@@ -5,16 +5,19 @@ from __future__ import annotations
 import hashlib
 import json
 import struct
+from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
 
-from openrugby_tools import cli, eagl, motion, pipeline
+from openrugby_tools import cli, eagl, loch, motion, pipeline, rosterdb
 from tests.test_bigf import build_big
 from tests.test_eagl import build_elf
+from tests.test_fntf import make_font
 from tests.test_fsh import _bitmap, _shpi
 from tests.test_motion import make_frames
 from tests.test_refpack import literal_stream
+from tests.test_rosterdb import _player, _team
 
 pytest.importorskip("PIL.Image")
 
@@ -35,6 +38,7 @@ def game(tmp_path: Path) -> Path:
             ("nested.big", inner),
             ("readme.txt", b"hello"),
         ]
+        + _data_members()  # game-data tables, string tables, LOCH and FntF members
     )
     (root / "Data" / "data.gob").write_bytes(data_gob)
     (root / "Data" / "motion" / "data.gob").write_bytes(data_gob)  # byte-identical copy
@@ -288,3 +292,171 @@ def test_animations_noop_without_clips(game: Path, tmp_path: Path) -> None:
     code, results = run(game, tmp_path / "out", "--stages=archives,animations")
     r = by_name(results)
     assert code == 0 and r["animations"].status == "ok" and r["animations"].counts["clips"] == 0
+
+
+# ---------------------------------------------------------------------------
+# database, strings and fonts stages
+# ---------------------------------------------------------------------------
+
+NEW_STAGES = ["archives", "database", "strings", "fonts"]
+FRENCH_MEMBER = rosterdb.STRINGS_MEMBER[: -len("english")] + "french"
+TEAMS_XML = (
+    b'<?xml version="1.0"?><hbstool><Project><team Index="5" Active="yes" Type="international" '
+    b'CodeId="ID_ENGLAND" FeGroup="international" StringTableId="1050" TeamName="England" '
+    b'Abbreviation="ENG" HomeColour="1,2,3,255" AwayColour="4,5,6,255" Logo="eng" />'
+    b"</Project></hbstool>"
+)
+KITS_XML = (
+    b'<config><teams><team name="England" location="england" id="5">'
+    b'<kit name="Home" location="homekit"/></team></teams></config>'
+)
+STADIUMS_XML = (
+    b'<hbstool><Project><stadium Index="14" Active="yes" CodeId="STA_ENG_TWICKENHAM" '
+    b'StadiumName="Twickenham" City="2234" Country="1050"><environment type="day"/>'
+    b"</stadium></Project></hbstool>"
+)
+
+
+def _data_members(
+    *,
+    english: bytes | None = None,
+    french: bytes | None = None,
+    extra: Sequence[tuple[str, bytes]] = (),
+) -> list[tuple[str, bytes]]:
+    """Members of a synthetic ``Data/data.gob`` covering the database, strings and fonts stages."""
+    squad = [500] + [0] * 29
+    font_a, _ = make_font()
+    font_b, _ = make_font(2, 2)
+    members = [
+        (rosterdb.RDF_MEMBER, rosterdb.build_rdf([_player(500)], [_team(5, squad)])),
+        (rosterdb.TEAMS_MEMBER, TEAMS_XML),
+        (rosterdb.KITS_HEADS_MEMBER, KITS_XML),
+        (rosterdb.STADIUMS_MEMBER, STADIUMS_XML),
+        (
+            rosterdb.STRINGS_MEMBER,
+            english or loch.build_strtab({1: "Yes", 2: "No", 2848: "Watford"}),
+        ),
+        (FRENCH_MEMBER, french or loch.build_strtab({1: "Oui"})),
+        ("aaaa1111.loc", loch.build_loch(["Do you want to overwrite?", "Unable to save %1."])),
+        ("bbbb2222.loc", loch.build_loch(["Yes"])),
+        ("cccc3333.ffn", font_a),
+        ("dddd4444.ffn", font_b),
+    ]
+    return members + list(extra)
+
+
+def _write_game(root: Path, members: list[tuple[str, bytes]]) -> Path:
+    (root / "Data").mkdir(parents=True, exist_ok=True)
+    (root / "Rugby08.exe").write_bytes(b"MZ fake")
+    (root / "Data" / "data.gob").write_bytes(build_big(members))
+    return root
+
+
+def test_database_strings_fonts_outputs_and_incremental(tmp_path: Path) -> None:
+    game = _write_game(tmp_path / "game", _data_members())
+    out = tmp_path / "out"
+    code, results = pipeline.run_pipeline(game, out, NEW_STAGES, workers=1)
+    r = by_name(results)
+    assert code == 0, [x.failures for x in results]
+
+    # database: rosterdb tables plus an index
+    assert r["database"].status == "ok" and r["database"].counts["players"] == 1
+    players = json.loads((out / "db" / "players.json").read_text())
+    assert players[0]["id"] == 500 and players[0]["teams"] == [5]
+    assert json.loads((out / "db" / "teams.json").read_text())[0]["name"] == "England"
+    assert json.loads((out / "db" / "index.json").read_text())["counts"]["players"] == 1
+
+    # strings: both HBS tables, every LOCH file
+    en = json.loads((out / "strings" / "strings_english.json").read_text())
+    assert en["ids"] == {"1": "Yes", "2": "No", "2848": "Watford"}
+    fr = json.loads((out / "strings" / "strings_french.json").read_text())
+    assert fr["ids"] == {"1": "Oui"}
+    assert json.loads((out / "strings" / "loch" / "aaaa1111.json").read_text())["strings"] == [
+        "Do you want to overwrite?",
+        "Unable to save %1.",
+    ]
+    assert (out / "strings" / "loch" / "bbbb2222.json").is_file()
+    assert r["strings"].counts == {
+        "string tables": 2,
+        "string entries": 4,
+        "loch files": 2,
+        "loch strings": 3,
+    }
+    index = json.loads((out / "strings" / "index.json").read_text())
+    assert index["tables"]["english"]["entries"] == 3 and len(index["loch"]) == 2
+
+    # fonts: PNG atlas + JSON metrics per FntF member
+    assert r["fonts"].counts == {"fonts": 2, "glyphs": 4}
+    assert (out / "fonts" / "cccc3333.png").is_file()
+    assert json.loads((out / "fonts" / "dddd4444.json").read_text())["glyph_count"] == 2
+    fonts = json.loads((out / "fonts" / "index.json").read_text())["fonts"]
+    assert {f["name"] for f in fonts} == {"cccc3333", "dddd4444"}
+    assert all(f["error"] is None and f["atlas"] for f in fonts)
+
+    # second run: all three stages are incremental
+    code2, results2 = pipeline.run_pipeline(game, out, NEW_STAGES, workers=1)
+    r2 = by_name(results2)
+    assert code2 == 0
+    for name in ("database", "strings", "fonts"):
+        assert r2[name].status == "unchanged", name
+        assert r2[name].counts == r[name].counts
+
+    # a changed archive re-runs all three
+    _write_game(game, _data_members(english=loch.build_strtab({1: "Changed"})))
+    _, results3 = pipeline.run_pipeline(game, out, NEW_STAGES, workers=1)
+    r3 = by_name(results3)
+    assert r3["archives"].status == "ok"
+    for name in ("database", "strings", "fonts"):
+        assert r3[name].status == "ok", name
+    assert json.loads((out / "strings" / "strings_english.json").read_text())["ids"] == {
+        "1": "Changed"
+    }
+
+    # --force rebuilds
+    _, results4 = pipeline.run_pipeline(game, out, NEW_STAGES, workers=1, force=True)
+    assert all(by_name(results4)[n].status == "ok" for n in ("database", "strings", "fonts"))
+
+
+def test_strings_failure_is_counted_and_retried(tmp_path: Path) -> None:
+    bad = _data_members(extra=[("eeee5555.loc", b"LOCH" + bytes(12))])
+    game = _write_game(tmp_path / "game", bad)
+    out = tmp_path / "out"
+    code, results = pipeline.run_pipeline(game, out, NEW_STAGES, workers=1)
+    r = by_name(results)
+    assert code == 1 and r["strings"].failed
+    assert len(r["strings"].failures) == 1 and "eeee5555.loc" in r["strings"].failures[0]
+    assert r["database"].status == "ok" and r["fonts"].status == "ok"
+    assert (out / "strings" / "loch" / "aaaa1111.json").is_file()  # good files still written
+    assert json.loads((out / "pipeline.json").read_text())["stages"]["strings"]["failures"] == 1
+
+    # a failed stage is never "unchanged": fixing the input re-runs it to success
+    _write_game(game, _data_members())
+    code2, results2 = pipeline.run_pipeline(game, out, NEW_STAGES, workers=1)
+    assert code2 == 0 and by_name(results2)["strings"].status == "ok"
+
+
+def test_database_failure_is_counted(tmp_path: Path) -> None:
+    members = [m for m in _data_members() if m[0] != rosterdb.RDF_MEMBER]
+    game = _write_game(tmp_path / "game", members)
+    code, results = pipeline.run_pipeline(game, tmp_path / "out", NEW_STAGES, workers=1)
+    r = by_name(results)
+    assert code == 1 and r["database"].failed
+    assert rosterdb.RDF_MEMBER in r["database"].failures[0]
+    assert r["strings"].status == "ok"  # independent stages still run
+
+
+def test_database_requires_archives_stage(tmp_path: Path) -> None:
+    game = _write_game(tmp_path / "game", _data_members())
+    code, results = pipeline.run_pipeline(game, tmp_path / "out", ["database"], workers=1)
+    assert code == 1 and "run the archives stage first" in results[0].failures[0]
+
+
+def test_new_stage_order_and_output_dirs_are_not_archives(tmp_path: Path) -> None:
+    order = pipeline.STAGES
+    assert order.index("archives") < order.index("database") < order.index("strings")
+    assert order.index("strings") < order.index("fonts") < order.index("textures")
+    assert pipeline.parse_stages("fonts,database,strings") == ["database", "strings", "fonts"]
+    out = tmp_path / "out"
+    for d in ("data.gob", "db", "strings", "fonts", "textures"):
+        (out / d).mkdir(parents=True)
+    assert [p.name for p in pipeline.archive_roots(out)] == ["data.gob"]

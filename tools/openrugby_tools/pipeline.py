@@ -8,6 +8,15 @@ Stages (always run in this order):
     Extract every top-level BIGF archive (``Data/*.gob|big|viv``, ``Data/motion/*``,
     ``Audio/*.big``) with RefPack decoding, then recurse into nested BIGF members of
     the game-data archives (up to :data:`MAX_NESTED_DEPTH` levels).
+``database``
+    Decode the roster / team / stadium / competition tables from ``Data/data.gob`` via
+    :mod:`rosterdb` to JSON (``<out>/db``, plus ``index.json``).
+``strings``
+    HBS string tables (``*.english``, ``*.french``) to ``<out>/strings/strings_<lang>.json``
+    and every LOCH locale table (``*.loc``) to ``<out>/strings/loch/<stem>.json``.
+``fonts``
+    Every FntF bitmap font (``*.ffn``) to a PNG atlas and JSON metrics
+    (``<out>/fonts``, plus ``index.json``). Needs Pillow.
 ``textures``
     Decode every SHPI/FSH member to PNG (``<out>/textures``).
 ``audio``
@@ -45,10 +54,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from . import audio, bigf, eagl, fsh, motion, refpack
+from . import audio, bigf, eagl, fntf, fsh, loch, motion, refpack, rosterdb
 
 PIPELINE_VERSION = 1
-STAGES = ("archives", "textures", "audio", "models", "animations")
+STAGES = ("archives", "database", "strings", "fonts", "textures", "audio", "models", "animations")
 MAX_NESTED_DEPTH = 8
 GAME_EXE = "Rugby08.exe"
 FFMPEG_ENV = "OPENRUGBY_FFMPEG"
@@ -56,6 +65,10 @@ ARCHIVE_SUFFIXES = (".gob", ".big", ".viv")
 SKELETON_NAME = "!skel.o"
 # Output trees that hold extracted archive members (scanned by textures/models).
 NESTED_SUFFIX = ".nested"
+# Top-level output directories that are not extracted archive trees.
+NON_ARCHIVE_OUTPUTS = frozenset(
+    {"audio", "ogg", "ogg-standalone", "textures", "models", "animations", "db", "strings", "fonts"}
+)
 
 
 class PipelineError(ValueError):
@@ -331,7 +344,7 @@ def archive_roots(out: Path) -> list[Path]:
     for child in sorted(out.iterdir()) if out.is_dir() else []:
         if not child.is_dir():
             continue
-        if child.name in {"audio", "ogg", "ogg-standalone", "textures", "models", "animations"}:
+        if child.name in NON_ARCHIVE_OUTPUTS:
             continue
         roots.append(child)
     return roots
@@ -903,11 +916,209 @@ def stage_animations(ctx: Context) -> StageResult:
 
 
 # ---------------------------------------------------------------------------
+# Stages: database, strings, fonts (see docs/re/09 and docs/re/13)
+# ---------------------------------------------------------------------------
+
+DATA_GOB_KEY = "Data/data.gob"
+NO_ARCHIVES = "no extracted archives under the output; run the archives stage first"
+
+
+def member_payloads(out: Path, roots: Iterable[Path], suffixes: tuple[str, ...]) -> dict[str, Path]:
+    """Map ``out``-relative member path to its decoded payload, for members named ``*suffixes``.
+
+    The RefPack-decoded ``<name>.unpacked`` sibling is preferred over the raw member.
+    """
+    found: dict[str, Path] = {}
+    for root in roots:
+        for dirpath, _dirs, files in os.walk(root):
+            for name in files:
+                base = name.removesuffix(".unpacked")
+                if not base.lower().endswith(suffixes):
+                    continue
+                raw = Path(dirpath) / base
+                payload = raw.with_name(base + ".unpacked")
+                if not payload.is_file():
+                    payload = raw
+                if payload.is_file():
+                    found[raw.relative_to(out).as_posix()] = payload
+    return dict(sorted(found.items()))
+
+
+def data_gob_dir(ctx: Context) -> Path | None:
+    """Output directory of the top-level ``Data/data.gob`` archive, if it was extracted."""
+    for s in ctx.sources:
+        if s.key == DATA_GOB_KEY and s.kind == "archive":
+            d = ctx.out / s.out_name_dir()
+            return d if d.is_dir() else None
+    return None
+
+
+def stage_database(ctx: Context) -> StageResult:
+    res = StageResult("database")
+    src = data_gob_dir(ctx)
+    if src is None:
+        res.status = "failed"
+        res.failures.append(f"{DATA_GOB_KEY} not extracted; run the archives stage first")
+        return res
+    out_db = ctx.out / "db"
+    signature = sha256_text(
+        ctx.archive_shas(("archive",)), module_hash(rosterdb, loch), PIPELINE_VERSION
+    )
+    if ctx.unchanged("database", signature, out_db / "index.json"):
+        res.status = "unchanged"
+        res.counts = ctx.stage_doc("database").get("counts", {})
+        return res
+    out_db.mkdir(parents=True, exist_ok=True)  # rosterdb overwrites its fixed file names
+    try:
+        counts = rosterdb.export(src, out_db)
+    except Exception as exc:  # noqa: BLE001 - reported as a stage failure
+        res.failures.append(f"{type(exc).__name__}: {exc}")
+        ctx.record("database", signature, res)
+        return res
+    files = {k: f"{k}.json" for k in counts}
+    (out_db / "index.json").write_text(
+        json.dumps({"source": DATA_GOB_KEY, "files": files, "counts": counts}, indent=1) + "\n",
+        encoding="utf-8",
+    )
+    res.counts = counts
+    ctx.record("database", signature, res)
+    return res
+
+
+def stage_strings(ctx: Context) -> StageResult:
+    res = StageResult("strings")
+    roots = archive_roots(ctx.out)
+    if not roots:
+        res.status = "failed"
+        res.failures.append(NO_ARCHIVES)
+        return res
+    out_s = ctx.out / "strings"
+    signature = sha256_text(ctx.archive_shas(("archive",)), module_hash(loch), PIPELINE_VERSION)
+    if ctx.unchanged("strings", signature, out_s / "index.json"):
+        res.status = "unchanged"
+        res.counts = ctx.stage_doc("strings").get("counts", {})
+        return res
+
+    members = member_payloads(ctx.out, roots, (".english", ".french", ".loc"))
+    if out_s.exists():
+        shutil.rmtree(out_s)
+    (out_s / "loch").mkdir(parents=True)
+    index: dict[str, Any] = {"tables": {}, "loch": []}
+    entries = 0
+    for lang in ("english", "french"):
+        hits = [(k, p) for k, p in members.items() if k.lower().endswith(f".{lang}")]
+        if len(hits) != 1:
+            res.failures.append(f"expected one .{lang} string table, found {len(hits)}")
+            continue
+        key, payload = hits[0]
+        try:
+            tab = loch.parse_strtab(payload.read_bytes())
+        except Exception as exc:  # noqa: BLE001 - one bad table is a counted failure
+            res.failures.append(f"{key}: {type(exc).__name__}: {exc}")
+            continue
+        (out_s / f"strings_{lang}.json").write_text(
+            json.dumps(tab, ensure_ascii=False, indent=1) + "\n", encoding="utf-8"
+        )
+        index["tables"][lang] = {
+            "source": key,
+            "file": f"strings_{lang}.json",
+            "entries": tab["count"],
+        }
+        entries += tab["count"]
+
+    loch_ok = loch_strings = 0
+    for key, payload in members.items():
+        if not key.lower().endswith(".loc"):
+            continue
+        dest = out_s / "loch" / f"{Path(key).stem}.json"
+        if dest.exists():
+            res.failures.append(f"{key}: duplicate LOCH name {dest.stem}")
+            continue
+        try:
+            doc = loch.parse_any(payload.read_bytes())
+        except Exception as exc:  # noqa: BLE001 - one bad file is a counted failure
+            res.failures.append(f"{key}: {type(exc).__name__}: {exc}")
+            index["loch"].append({"source": key, "error": str(exc)})
+            continue
+        dest.write_text(json.dumps(doc, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+        loch_ok += 1
+        loch_strings += doc["count"]
+        index["loch"].append({"source": key, "file": f"loch/{dest.name}", "strings": doc["count"]})
+
+    (out_s / "index.json").write_text(json.dumps(index, indent=1) + "\n", encoding="utf-8")
+    res.counts = {
+        "string tables": len(index["tables"]),
+        "string entries": entries,
+        "loch files": loch_ok,
+        "loch strings": loch_strings,
+    }
+    ctx.record("strings", signature, res)
+    return res
+
+
+def stage_fonts(ctx: Context) -> StageResult:
+    res = StageResult("fonts")
+    try:
+        import PIL.Image  # noqa: F401 - fntf.convert writes PNG atlases with Pillow
+    except ImportError:
+        res.status = "failed"
+        res.failures.append("Pillow is not installed (needed for font PNG atlases)")
+        return res
+    roots = archive_roots(ctx.out)
+    if not roots:
+        res.status = "failed"
+        res.failures.append(NO_ARCHIVES)
+        return res
+    out_f = ctx.out / "fonts"
+    signature = sha256_text(ctx.archive_shas(("archive",)), module_hash(fntf), PIPELINE_VERSION)
+    if ctx.unchanged("fonts", signature, out_f / "index.json"):
+        res.status = "unchanged"
+        res.counts = ctx.stage_doc("fonts").get("counts", {})
+        return res
+
+    members = member_payloads(ctx.out, roots, (".ffn",))
+    if out_f.exists():
+        shutil.rmtree(out_f)
+    out_f.mkdir(parents=True)
+    fonts: list[dict[str, Any]] = []
+    glyphs = 0
+    for key, payload in members.items():
+        stem = Path(key).stem
+        rec: dict[str, Any] = {"source": key, "name": stem, "error": None}
+        if any(f["name"] == stem for f in fonts):
+            rec["error"] = "duplicate font name"
+        else:
+            try:
+                meta = fntf.convert(payload, out_f)
+                rec.update(
+                    glyphs=meta["glyph_count"],
+                    atlas=[meta["atlas_width"], meta["atlas_height"]],
+                    png=f"{stem}.png",
+                    json=f"{stem}.json",
+                )
+                glyphs += meta["glyph_count"]
+            except Exception as exc:  # noqa: BLE001 - one bad font is a counted failure
+                rec["error"] = f"{type(exc).__name__}: {exc}"
+        if rec["error"]:
+            res.failures.append(f"{key}: {rec['error']}")
+        fonts.append(rec)
+    (out_f / "index.json").write_text(
+        json.dumps({"fonts": fonts}, indent=1) + "\n", encoding="utf-8"
+    )
+    res.counts = {"fonts": sum(1 for f in fonts if not f["error"]), "glyphs": glyphs}
+    ctx.record("fonts", signature, res)
+    return res
+
+
+# ---------------------------------------------------------------------------
 # Driver
 # ---------------------------------------------------------------------------
 
 STAGE_FUNCS: dict[str, Callable[[Context], StageResult]] = {
     "archives": stage_archives,
+    "database": stage_database,
+    "strings": stage_strings,
+    "fonts": stage_fonts,
     "textures": stage_textures,
     "audio": stage_audio,
     "models": stage_models,
