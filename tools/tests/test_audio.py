@@ -12,6 +12,11 @@ from openrugby_tools import audio
 HAS_FFMPEG = shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None
 needs_ffmpeg = pytest.mark.skipif(not HAS_FFMPEG, reason="ffmpeg/ffprobe not on PATH")
 
+VGMSTREAM = audio.find_vgmstream()
+needs_vgmstream = pytest.mark.skipif(
+    not HAS_FFMPEG or VGMSTREAM is None, reason="vgmstream-cli or ffmpeg not available"
+)
+
 REPO = Path(__file__).resolve().parents[2]
 AUDIO = REPO / "extracted" / "audio"
 
@@ -131,7 +136,7 @@ def test_gstr_revision2_4_fails_cleanly(tmp_path: Path) -> None:
     src = AUDIO / "dat_eng.big" / "0001_Abril.dat"
     if not src.exists():
         pytest.skip("extracted audio not present (run the extract step first)")
-    result = audio.convert_one(src, src.parent, tmp_path)
+    result = audio.convert_one(src, src.parent, tmp_path, vgmstream=None)
     assert not result.ok
     assert result.error
     assert result.header["revision2"] == 4
@@ -145,10 +150,58 @@ def test_convert_tree_writes_index(tmp_path: Path) -> None:
     (src / "bad.dat").write_bytes(GSTR_STREAM)
     (src / "zeros.dat").write_bytes(b"\0" * 64)
     out = tmp_path / "out"
-    index = audio.convert_tree(src, out, workers=2)
+    index = audio.convert_tree(src, out, workers=2, vgmstream=None)
     assert index["summary"]["total"] == 1
     assert index["summary"]["failed"] == 1
     doc = json.loads((out / "index.json").read_text(encoding="utf-8"))
     assert doc["entries"][0]["source"] == "bad.dat"
     assert doc["entries"][0]["ok"] is False
     assert doc["entries"][0]["header"]["codec"] == 3
+
+
+def test_find_vgmstream_explicit_and_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = tmp_path / "vgmstream-cli"
+    fake.write_bytes(b"")
+    assert audio.find_vgmstream(fake) == fake
+    assert audio.find_vgmstream(tmp_path / "nope") is None  # no silent fallthrough
+    monkeypatch.setenv(audio.VGMSTREAM_ENV, str(fake))
+    assert audio.find_vgmstream() == fake
+    monkeypatch.setenv(audio.VGMSTREAM_ENV, str(tmp_path / "nope"))
+    assert audio.find_vgmstream() is None
+
+
+@needs_vgmstream
+def test_microtalk_stream_decodes_via_vgmstream(tmp_path: Path) -> None:
+    src = AUDIO / "dat_eng.big" / "0001_Abril.dat"
+    if not src.exists():
+        pytest.skip("extracted audio not present (run the extract step first)")
+    result = audio.convert_one(src, src.parent, tmp_path, vgmstream=VGMSTREAM)
+    assert result.ok, result.error
+    assert result.decoder == "vgmstream"
+    assert result.rate == 22050
+    assert result.channels == 1
+    assert result.duration == pytest.approx(result.header["duration_s"], abs=0.02)
+    assert (tmp_path / "0001_Abril.ogg").stat().st_size > 0
+
+
+@needs_vgmstream
+def test_referee_stream_decodes_via_vgmstream(tmp_path: Path) -> None:
+    src = AUDIO / "ref_eng.big" / "Referee_Australia_Colours_Advantage_Calling_1.snd"
+    if not src.exists():
+        pytest.skip("extracted audio not present (run the extract step first)")
+    result = audio.convert_one(src, src.parent, tmp_path, vgmstream=VGMSTREAM)
+    assert result.ok, result.error
+    assert result.rate == 44100
+    assert result.duration == pytest.approx(53717 / 44100, abs=0.02)
+
+
+@needs_vgmstream
+def test_ffmpeg_stream_keeps_ffmpeg_decoder(tmp_path: Path) -> None:
+    src = AUDIO / "chants.big" / "Aus001.asf"
+    if not src.exists():
+        pytest.skip("extracted audio not present (run the extract step first)")
+    result = audio.convert_one(src, src.parent, tmp_path, vgmstream=VGMSTREAM)
+    assert result.ok, result.error
+    assert result.decoder == "ffmpeg"

@@ -16,11 +16,14 @@ single-byte markers are skipped: ``0xFD`` (precedes the codec item) and ``0x00``
 * ``0x82`` channel count (absent in some streams).
 * ``0x84`` sample rate in Hz.
 * ``0x85`` sample count per channel (matches decoded length to within ~0.1%).
-* ``0xA0`` unknown "revision2"; ffmpeg rejects streams where it is 4.
-* ``0x06``, ``0x0B``, ``0xA0`` other values: recorded raw, meaning unverified.
+* ``0xA0`` "revision2" in ffmpeg, "codec2" in vgmstream: 4 = EA MicroTalk
+  (speech), 9 = signed 8-bit PCM. ffmpeg rejects both; vgmstream decodes them.
+* ``0x06``, ``0x0B`` and others: recorded raw, meaning unverified.
 
-Conversion shells out to ffmpeg using the ``ea`` demuxer. ffmpeg is never
-required for header parsing.
+Conversion shells out to ffmpeg using the ``ea`` demuxer. Streams that carry
+``0xA0``, or that ffmpeg fails on, are decoded to WAV with ``vgmstream-cli``
+(dev-time tool, never shipped) and then encoded to OGG with ffmpeg. ffmpeg is
+never required for header parsing.
 """
 
 from __future__ import annotations
@@ -33,6 +36,7 @@ import shutil
 import struct
 import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -43,6 +47,9 @@ PT_MARKER = b"PT\x00\x00"
 GSTR_MARKER = b"GSTR"
 DEFAULT_WORKERS = 8
 DEFAULT_QUALITY = 5
+VGMSTREAM_ENV = "OPENRUGBY_VGMSTREAM"
+REPO_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_VGMSTREAM = REPO_ROOT / ".omc" / "research" / "bin" / "vgmstream-cli"
 
 TAG_CODEC = 0x80
 TAG_CHANNELS = 0x82
@@ -166,6 +173,22 @@ def find_schl_files(src: Path) -> list[Path]:
     return sorted(p for p in src.rglob("*") if p.is_file() and is_schl_file(p))
 
 
+def find_vgmstream(explicit: Path | str | None = None) -> Path | None:
+    """Locate ``vgmstream-cli``: explicit path, ``$OPENRUGBY_VGMSTREAM``, repo default, PATH.
+
+    An explicit path or env value that does not exist yields ``None`` rather than
+    falling through, so a typo is not silently masked by another binary.
+    """
+    chosen = explicit or os.environ.get(VGMSTREAM_ENV)
+    if chosen:
+        path = Path(chosen)
+        return path if path.is_file() else None
+    if DEFAULT_VGMSTREAM.is_file():
+        return DEFAULT_VGMSTREAM
+    found = shutil.which("vgmstream-cli")
+    return Path(found) if found else None
+
+
 @dataclass
 class ConversionResult:
     """Outcome of converting one ``SCHl`` file."""
@@ -179,6 +202,7 @@ class ConversionResult:
     channels: int | None = None
     rate: int | None = None
     output_bytes: int | None = None
+    decoder: str | None = None
 
 
 def _ffmpeg_error(stderr: str) -> str:
@@ -213,28 +237,8 @@ def probe_ogg(path: Path) -> dict[str, Any]:
     }
 
 
-def convert_one(
-    source: Path,
-    src_root: Path,
-    out_root: Path,
-    quality: int = DEFAULT_QUALITY,
-) -> ConversionResult:
-    """Convert one ``SCHl`` file to OGG Vorbis under ``out_root``.
-
-    The output mirrors the source path relative to ``src_root``. A partial
-    output is removed if ffmpeg fails. The header is always parsed, even when
-    conversion fails, so the index still records what the stream declares.
-    """
-    rel = source.relative_to(src_root) if source.is_relative_to(src_root) else Path(source.name)
-    rel_str = rel.as_posix()
-    try:
-        head = parse_schl_header(source.read_bytes()[:4096])
-        header: dict[str, Any] = head.as_dict()
-    except (OSError, SchlError) as exc:
-        return ConversionResult(rel_str, None, False, f"header: {exc}", {})
-
-    out_path = (out_root / rel).with_suffix(".ogg")
-    out_path.parent.mkdir(parents=True, exist_ok=True)
+def _encode_with_ffmpeg(source: Path, out_path: Path, quality: int) -> str | None:
+    """Decode ``source`` and encode OGG with ffmpeg. Returns an error string or ``None``."""
     cmd = [
         "ffmpeg",
         "-hide_banner",
@@ -255,14 +259,103 @@ def convert_one(
         str(out_path),
     ]
     proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
-    if proc.returncode != 0:
+    return None if proc.returncode == 0 else _ffmpeg_error(proc.stderr)
+
+
+def _encode_with_vgmstream(
+    source: Path, out_path: Path, quality: int, vgmstream: Path
+) -> str | None:
+    """Decode with ``vgmstream-cli`` to WAV, then encode OGG with ffmpeg.
+
+    vgmstream picks its parser by file extension and rejects ``.dat``, so the
+    source is symlinked as ``.snd`` inside a private temp directory.
+    """
+    with tempfile.TemporaryDirectory(prefix="openrugby-vgm-") as tmp:
+        link = Path(tmp) / "in.snd"
+        wav = Path(tmp) / "out.wav"
+        try:
+            link.symlink_to(source.resolve())
+        except OSError:
+            shutil.copyfile(source, link)
+        proc = subprocess.run(
+            [str(vgmstream), "-o", str(wav), str(link)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if proc.returncode != 0 or not wav.exists():
+            lines = [ln.strip() for ln in (proc.stderr or proc.stdout).splitlines() if ln.strip()]
+            return f"vgmstream: {lines[-1] if lines else 'failed with no diagnostic output'}"
+        proc = subprocess.run(
+            [
+                "ffmpeg",
+                "-hide_banner",
+                "-nostdin",
+                "-loglevel",
+                "error",
+                "-y",
+                "-i",
+                str(wav),
+                "-c:a",
+                "libvorbis",
+                "-q:a",
+                str(quality),
+                "-f",
+                "ogg",
+                str(out_path),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return None if proc.returncode == 0 else _ffmpeg_error(proc.stderr)
+
+
+def convert_one(
+    source: Path,
+    src_root: Path,
+    out_root: Path,
+    quality: int = DEFAULT_QUALITY,
+    vgmstream: Path | None = None,
+) -> ConversionResult:
+    """Convert one ``SCHl`` file to OGG Vorbis under ``out_root``.
+
+    ``vgmstream`` is the path to ``vgmstream-cli`` (``None`` disables the
+    fallback; see :func:`find_vgmstream`). The output mirrors the source path
+    relative to ``src_root``. A partial output is removed on failure. The header is
+    always parsed, even when conversion fails, so the index still records what the
+    stream declares.
+    """
+    rel = source.relative_to(src_root) if source.is_relative_to(src_root) else Path(source.name)
+    rel_str = rel.as_posix()
+    try:
+        head = parse_schl_header(source.read_bytes()[:4096])
+        header: dict[str, Any] = head.as_dict()
+    except (OSError, SchlError) as exc:
+        return ConversionResult(rel_str, None, False, f"header: {exc}", {})
+
+    out_path = (out_root / rel).with_suffix(".ogg")
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    decoder = "ffmpeg"
+    error: str | None = None
+    # 0xA0 streams are known to fail in ffmpeg, so skip straight to vgmstream.
+    if head.revision2 is None or vgmstream is None:
+        error = _encode_with_ffmpeg(source, out_path, quality)
+    else:
+        error = "skipped ffmpeg: header carries 0xA0"
+    if error is not None and vgmstream is not None:
+        decoder = "vgmstream"
+        error = _encode_with_vgmstream(source, out_path, quality, vgmstream)
+    if error is not None:
         out_path.unlink(missing_ok=True)
-        return ConversionResult(rel_str, None, False, _ffmpeg_error(proc.stderr), header)
+        return ConversionResult(rel_str, None, False, error, header, decoder=decoder)
 
     try:
         info = probe_ogg(out_path)
     except (subprocess.CalledProcessError, KeyError, IndexError, ValueError) as exc:
-        return ConversionResult(rel_str, out_path.as_posix(), False, f"ffprobe: {exc}", header)
+        return ConversionResult(
+            rel_str, out_path.as_posix(), False, f"ffprobe: {exc}", header, decoder=decoder
+        )
     return ConversionResult(
         source=rel_str,
         output=out_path.relative_to(out_root).as_posix(),
@@ -273,6 +366,7 @@ def convert_one(
         channels=info["channels"],
         rate=info["rate"],
         output_bytes=out_path.stat().st_size,
+        decoder=decoder,
     )
 
 
@@ -281,6 +375,7 @@ def convert_tree(
     out: Path,
     workers: int = DEFAULT_WORKERS,
     quality: int = DEFAULT_QUALITY,
+    vgmstream: Path | None = None,
 ) -> dict[str, Any]:
     """Convert every ``SCHl`` file under ``src`` and write ``out/index.json``.
 
@@ -299,7 +394,7 @@ def convert_tree(
     root = src if src.is_dir() else src.parent
     started = time.monotonic()
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
-        results = list(pool.map(lambda f: convert_one(f, root, out, quality), files))
+        results = list(pool.map(lambda f: convert_one(f, root, out, quality, vgmstream), files))
     elapsed = time.monotonic() - started
     results.sort(key=lambda r: r.source)
     ok = [r for r in results if r.ok]
@@ -312,6 +407,8 @@ def convert_tree(
         "elapsed_s": round(elapsed, 2),
         "workers": workers,
         "quality": quality,
+        "vgmstream": str(vgmstream) if vgmstream else None,
+        "by_decoder": {d: sum(1 for r in ok if r.decoder == d) for d in ("ffmpeg", "vgmstream")},
     }
     index: dict[str, Any] = {
         "source_root": str(src),
@@ -332,6 +429,12 @@ def _build_parser() -> argparse.ArgumentParser:
     conv.add_argument("out", type=Path, help="output directory (index.json is written here)")
     conv.add_argument("--workers", type=int, default=DEFAULT_WORKERS)
     conv.add_argument("-q", "--quality", type=int, default=DEFAULT_QUALITY)
+    conv.add_argument(
+        "--vgmstream",
+        type=Path,
+        default=None,
+        help=f"vgmstream-cli path (default: ${VGMSTREAM_ENV}, .omc/research/bin, PATH)",
+    )
     return parser
 
 
@@ -342,7 +445,10 @@ def main(argv: list[str] | None = None) -> int:
         if not args.src.exists():
             print(f"error: {args.src} does not exist", file=sys.stderr)
             return 2
-        index = convert_tree(args.src, args.out, workers=args.workers, quality=args.quality)
+        vgm = find_vgmstream(args.vgmstream)
+        index = convert_tree(
+            args.src, args.out, workers=args.workers, quality=args.quality, vgmstream=vgm
+        )
         print(json.dumps(index["summary"], indent=2))
         return 0
     return 2
