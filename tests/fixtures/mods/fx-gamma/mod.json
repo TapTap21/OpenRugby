@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "id": "fx-gamma",
+  "name": "Fixture Script Gamma",
+  "version": "1.0.0",
+  "game_version": ">=0.1.0 <0.2.0",
+  "capabilities": ["scripts"],
+  "entry_script": "main.gd"
+}

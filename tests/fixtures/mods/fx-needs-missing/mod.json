@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "id": "fx-needs-missing",
+  "name": "Fixture Needs Missing Dependency",
+  "version": "1.0.0",
+  "game_version": ">=0.1.0 <0.2.0",
+  "dependencies": [{"id": "fx-does-not-exist"}],
+  "capabilities": []
+}

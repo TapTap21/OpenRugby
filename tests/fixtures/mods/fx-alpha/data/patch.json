@@ -1,0 +1,20 @@
+{
+  "patches": [
+    {
+      "target": "res://tests/fixtures/data/probe.tres",
+      "fields": {
+        "count": 7,
+        "strength": 2.5,
+        "enabled": true,
+        "label": "alpha",
+        "tag": "alpha_tag",
+        "level": "HIGH",
+        "tint": "#c8102e",
+        "offset": [1, 2, 3],
+        "kit/primary_color": [0.5, 0.25, 1.0],
+        "bag": {"a": 1, "b": null},
+        "values": {"$append": [4]}
+      }
+    }
+  ]
+}

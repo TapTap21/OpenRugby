@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "id": "fx-badjson",
+  "name": "Fixture Invalid Json",
+  "version": "1.0.0",
+  "game_version": ">=0.1.0 <0.2.0",
+  "capabilities": [

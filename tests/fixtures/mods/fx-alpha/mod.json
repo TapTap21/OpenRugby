@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "id": "fx-alpha",
+  "name": "Fixture Alpha",
+  "version": "1.0.0",
+  "author": "tests",
+  "description": "Data and asset patches, one shadowed kit.",
+  "game_version": ">=0.1.0 <0.2.0",
+  "dependencies": [],
+  "load_priority": 0,
+  "capabilities": ["data", "assets"]
+}

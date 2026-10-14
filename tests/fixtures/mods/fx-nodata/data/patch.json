@@ -1,0 +1,8 @@
+{
+  "patches": [
+    {
+      "target": "res://tests/fixtures/data/probe.tres",
+      "fields": {"ratio": 0.9}
+    }
+  ]
+}
