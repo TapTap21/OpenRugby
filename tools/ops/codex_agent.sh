@@ -32,6 +32,7 @@ codex exec \
 	-c approval_policy=never \
 	-c 'mcp_servers.rea.env.REA_GHIDRA_STARTUP_TIMEOUT_MS="1800000"' \
 	-c mcp_servers.rea.tool_timeout_sec=1800 \
+	-c 'mcp_servers.rea.default_tools_approval_mode="approve"' \
 	-c mcp_servers.rea.startup_timeout_sec=120 \
 	-s workspace-write \
 	--add-dir "$root/.omc" \

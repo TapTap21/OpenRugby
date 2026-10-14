@@ -379,11 +379,175 @@ goal-kick meter.
 
 ### 2.7 Passing, catching and pickup
 
-PENDING: merge from `.omc/research/phys/pass-notes.md` (sub-agent p1-phys-pass, which was running when Claude quota ran out). Anchors: CPass vtable 0x8f68bc; launcher 0x621b20; CCatch 0x8f591c; CPickup 0x8f6cc8; players_PassQualityWithFatigue 0x608b70.
+Evidence for this section is the saved local disassembly checkpoint in
+`.omc/research/phys/pass-RESUME.md`; the REA session was unavailable in this
+run, so these claims remain local/medium or low confidence until they are
+reconfirmed and receive complete REA evidence IDs.
+
+* **Pass aim and flight [O/local].** A pass is aimed at the receiver's
+  predicted position at release time plus the selected flight time. The
+  receiver prediction is sampled in 1/50 s animation ticks. The pass target
+  is offset 2 m ahead along attack direction (3 m for the lead variant).
+  A special lead variant scales the predicted receiver's x position by 0.8.
+  Given start `p0`, target `p1`, flight time `T`, and gravity `g = −9.8 m/s²`,
+  the launch velocity is the ballistic solution
+  `v_xz = (p1_xz − p0_xz)/T` and
+  `v_y = (p1_y − p0_y − 0.5·g·T²)/T`. The arc is therefore determined by the
+  target height and flight time; the exact target height is unresolved.
+* **Pass pace by type [O/local].** Flight time uses the Passing stat `P` on a
+  0–100 scale. The normal pass (type 0) takes 0.5 s, or 0.9 s in the lead
+  variant. Types 3 and 6 take 0.5 s; types 7, 8 and 11 take 0.7 s. Other
+  observed types use `T = 1.5 − 0.95·P/100`, giving 0.55–1.5 s. For a
+  non-natural scrum-half wearing jersey 9, selected types (1, 2, 3, 4, 9)
+  multiply T by 1.33 outside training. Short, dive-normal, short-pass and
+  maul-pass-left animation labels exist, but the complete mapping to the
+  user's short/long/spin/pop/offload categories is not established. The
+  special spin routine observed at 0x642880 belongs to a lineout throw, not
+  open-play passing. Do not infer a spin amount for ordinary passes.
+* **Forward-pass assist [O/local].** A settings probability, indexed by
+  setting 1–5, flattens a forward-directed pass to `v_z = −0.01·attack_dir`
+  when its forward component magnitude is at least 8 m/s. The probabilities
+  are 0.5, 0.6, 0.7, 0.8 and 0.9. A slower forward-directed pass is always
+  flattened. At setting 0, this assist does not run. With no catcher, the
+  helper instead caps pass speed at 20 m/s. This is an assist behaviour, not
+  the referee's forward-pass decision; laws and infringement ownership stay
+  with spec 05.
+* **Passing quality and fatigue [O, cross-reference].** Passing is attribute
+  index 6. The players spec applies fatigue penalty
+  `floor((100 − energy_percent)/3)` to Passing at the pass-quality query
+  (0x608b70). Use `effective_passing = max(0, base_passing − penalty)` where
+  the receiving code clamps it; fatigue does not alter the underlying player
+  record. Pass flight-time interpolation uses the value fed to the pass
+  builder; whether every caller supplies the fatigue-adjusted query is not
+  proven here. See [09 players and teams](09-players-teams-db.md).
+* **Catch resolution [O/local, semantics partly U].** Catch selection tests
+  hand segments 0x0a and 0x0f with radii 1.0 m and 2.0 m, then chooses a
+  candidate by a score that is not fully reconstructed. A catch may fail due
+  to an out-of-position flag, the fumble roll, or a random catch roll. The
+  creation path stores a Handling-derived term
+  `1 − (0.25 + 0.5·Handling/100)`; the comparison direction and the gating
+  predicate are unresolved, so do not treat this term as a proven catch
+  probability. A non-natural back (roles 9–12) can receive an out-of-position
+  flag in one match mode after an approximately 50% roll. The failure/drop
+  event and offside/interference rules are separate concerns.
+* **Fumble / knock-on [O/local].** The base fumble probability table is below.
+  Catch-quality band is Excellent, Good, Average or Terrible; it comes from
+  the catch-sequence name suffix, defaulting to Average. Handling buckets are
+  `<40`, `40–64`, `65–84`, `≥85`. Columns below are ordered from highest to
+  lowest Handling. The calculated table value is multiplied by 0.5 on a dry
+  surface or 1.0 on a slippery one, then by 0.5. A further setting scale
+  applies: settings through 60 map to 0 or 1 by integer division; above 60,
+  the scale rises linearly from 1 to 10 at 100. Pitch conditions 3, 4 and 5
+  are treated as slippery. This is the physical fumble roll; classification
+  of the resulting loose ball as knock-on is owned by the rules spec.
+
+| Catch band | Handling ≥85 | 65–84 | 40–64 | <40 |
+|---|---:|---:|---:|---:|
+| Excellent | 0.00 | 0.01 | 0.02 | 0.05 |
+| Good | 0.01 | 0.03 | 0.05 | 0.10 |
+| Average | 0.05 | 0.10 | 0.15 | 0.25 |
+| Terrible | 0.10 | 0.15 | 0.25 | 0.50 |
+
+* **Pickup [O/local].** A pickup fails while the ball is already held, if its
+  vertical separation from the player exceeds 1.0 m, or if the ball fails a
+  hand-capsule intersection check of radius 0.1 m. The pickup fumble band is
+  selected from a ball-state flag (Average or Good); exact naming of that
+  flag's states is unresolved. A set-play catch uses Average quality and
+  drops when distance exceeds 2.5 m.
 
 ### 2.8 Tackling and contact
 
-PENDING: merge from `.omc/research/phys/tackle-notes.md` (sub-agent p1-phys-tackle, which was running when Claude quota ran out). Anchors: CTackle vtables 0x8f7614/0x8f7620; code 0x754f00–0x75b000; CRun 0x8f70f8 (sidestep/hand-off); CDive 0x8f5fd8; string 0x8f74f8 (broken-tackle chance).
+This section is reconstructed from `.omc/research/phys/tackle-RESUME.md`.
+Because REA could not be opened in this run, the numeric checkpoint has not
+been independently revalidated here. Treat labels as behavioural names for
+the rebuild, not a proposal to reproduce the original code structure.
+
+* **Standard tackle and break [O/local].** A standard tackle uses the
+  defender's Tackling stat plus a carrier-strength-category bonus. Carrier
+  Strength bands are `≥90`, `75–89`, `60–74`, and `<60`; corresponding bonuses
+  are 0, 15, 10 and 20. Add 10 when the defender and carrier face more than
+  135° apart (head-on). A defender with the Tackle ability has an effective
+  Tackling floor of 90. The broken-tackle chance is
+  `1 − clamp((effective_tackling + bonus)/100, 0, 1) + carrier_break_modifier`;
+  the final modifier at carrier record +0xd0 is unknown. An out-of-position
+  fullback case can force the chance to 0.75. A successful break roll selects
+  the broken-tackle outcome when its animation is available.
+* **Other contact types [O/local with enum inferences].** Type 0 is the normal
+  tackle; type 1 is a successful broken tackle; type 2 is dive; type 3 is
+  inferred as dive-tap; types 4/5 are inferred side tackles; type 6 is a
+  double tackle; 7 is charge; 8 is hand-off; 9/10 are inferred sidestep
+  variants. For types 1–6, base chance is selected from
+  `{0.10, 0.15, 0.20, 0.25, 0.30}` by a 0–5 setting (setting 0 produces 0).
+  Charge, hand-off and sidestep bases are 0.4, 0.5 and 0.2 respectively.
+  Modifiers scale the base as `clamp(base·O/T, 0, 1)`, where defender power
+  `T = Tackling + 0.1·(Weight−100) + speed + Strength + 0.1·Aggression +
+  40·TackleAbility`; carrier power `O` uses the same base terms plus
+  `30·TackleBreaker + 20·CrashBall`. Charge adds 100 per prior tackler and
+  250 against a carrier below 0.5 m/s; sidestep adds `0.2·carrier_Agility`
+  unless the defender has Tackle ability. The saved analysis applies both
+  O and T terms to the defender argument, an unresolved likely call/data
+  oddity. Non-charge types have zero chance when another tackler is already
+  involved. Charge and hand-off failures fall back to standard tackle logic.
+* **Approach, angle and dive [O/local/inferred].** The tackle trigger search
+  uses a 7.5 m/s speed constant, a 90° cone and a 0.15×50 tick reach factor.
+  Head-on is over 135°; side-tackle selection is associated with relative
+  angles beyond 60°. A dive-tackle reach path exists, but its distance and
+  exact trigger are unresolved. The exact velocity contribution, angle
+  convention and any independent approach-speed multiplier have not been
+  established; do not invent additional numeric modifiers. The saved notes
+  indicate tackler/player speed is read from the actor state, but this is an
+  inference.
+* **Fend, hand-off, sidestep and shoulder charge [O/I].** Run input modes 0
+  or above 3 select charge; mode 3 selects hand-off; modes 1 and 2 select the
+  normal contest. A progress threshold can cancel the special action and
+  return to normal tackle. The precise input mapping and progress values are
+  not yet fully resolved. Sidestep and hand-off correspond to separate
+  tackle outcomes and can affect break probability as above. No independent
+  fend strength formula was recovered. “Shoulder charge” maps to the charge
+  outcome only as a rebuild inference; its high-tackle and legality checks
+  belong with the rules/animation state.
+* **Big hits [O/local].** The big-hit flag requires at least 50% energy and
+  either Tackling, Strength and Aggression all at least 80, or the Tackle
+  ability; the carrier must have Strength below 90. A second observed path
+  uses Aggression and Tackling ≥70 with energy ≥35. The energy cost and which
+  path is used in each match state are unknown. Human high-tackle input sets
+  a separate high-tackle flag. These flags affect the contact animation and
+  spill model; they do not prove a legal tackle under the rules.
+* **Ball spill [O/local].** Standard tackle, dive and double/special outcomes
+  are excluded from the spill roll for the listed special types. For eligible
+  tackles, base spill chance is 0.25 for a head-on dive or high-tackle flag,
+  otherwise 0.05 for a big hit, otherwise 0.02. Named player exceptions add
+  further chance (0.4 for one player; a second player's big hit adds 0.3 or
+  0.85 depending on carrier abilities). An impact-player event may override
+  the chance, and a tackle-specific drop modifier is added. On spill, ball
+  velocity is scaled uniformly from 0.75 to 1.25. These constants describe
+  the loose-ball event only; whether it is a knock-on is decided by rules.
+
+| Contact tunable | Value | Unit | Evidence/location | Confidence |
+|---|---:|---|---|---|
+| Carrier strength bands | 90 / 75 / 60 | stat | 0x754cc0, local tackle checkpoint | med |
+| Break chance strength bonuses | 0 / 15 / 10 / 20 | stat points | 0x754680, local tackle checkpoint | med |
+| Head-on bonus threshold / bonus | 135 / 10 | degrees / stat points | 0x754680, local tackle checkpoint | med |
+| Tackle ability effective skill floor | 90 | stat | 0x754680, local tackle checkpoint | med |
+| Out-of-position break chance | 0.75 | probability | 0x754560, local tackle checkpoint | med |
+| Tackle trigger speed / cone | 7.5 / 90 | m/s / degrees | 0x7535f0, local tackle checkpoint | med |
+| Tackle trigger reach factor | 0.15×50 ticks | ticks | 0x7535f0, local tackle checkpoint | low |
+| Side tackle relative angle | 60 | degrees | 0x69b3b0, local tackle checkpoint | low |
+| Prior tackler charge bonus | 100 | power units per tackler | 0x754680, local tackle checkpoint | med |
+| Stationary carrier threshold / penalty | 0.5 / 250 | m/s / power units | 0x754680, local tackle checkpoint | med |
+| Spill base (head-on dive/high tackle; big hit; normal) | 0.25 / 0.05 / 0.02 | probability | 0x759520, local tackle checkpoint | med |
+| Big-hit first-path energy and attributes | 50%; stats ≥80 or Tackle ability | % / stat | 0x75a780, local tackle checkpoint | med |
+| Big-hit second-path energy and attributes | 35%; Aggression/Tackling ≥70 | % / stat | 0x75a960, local tackle checkpoint | med |
+| Big-hit carrier strength ceiling | <90 | stat | 0x75a780, local tackle checkpoint | med |
+| Spill velocity multiplier | 0.75–1.25 | × | 0x759520, local tackle checkpoint | med |
+| Catch hand-segment radii | 1.0 / 2.0 | m | 0x7362d0, local pass checkpoint | med |
+| Pickup vertical limit / capsule radius | 1.0 / 0.1 | m | 0x7501b0 / 0x74fef0, local pass checkpoint | med |
+| Slippery pitch conditions | 3, 4, 5 | condition ids | 0x6565a0, local pass checkpoint | med |
+
+**Tackle RNG.** Every contest, break and spill roll must use the match RNG.
+The recovered generator produces a normalized roll `(raw & 65535)/65535`;
+probability checks compare the roll strictly below the probability. This
+detail is local evidence and needs REA confirmation.
 
 ### 2.9 Player locomotion
 
@@ -475,8 +639,8 @@ PENDING: merge from `.omc/research/phys/tackle-notes.md` (sub-agent p1-phys-tack
 
 These are proposed Godot `Resource` fields. Group them as `BallPhysicsParams`,
 `PitchSurfaceParams` (one per pitch condition), `BallPredictorParams`,
-`KickParams` (one per kick type), `KickerStatParams`, `LocomotionParams` and
-`SimTimingParams`.
+`KickParams` (one per kick type), `KickerStatParams`, `PassParams`,
+`CatchParams`, `TackleParams`, `LocomotionParams` and `SimTimingParams`.
 
 | Resource.field | Value | Unit | Where used | Evidence |
 |---|---|---|---|---|
@@ -535,8 +699,32 @@ These are proposed Godot `Resource` fields. Group them as `BallPhysicsParams`,
 | LocomotionParams.fatigue_option_range | 0.75 – 1.5 | × | 0x60ccd0 | local |
 | LocomotionParams.sprint_start / keep energy | > 8 / > 0 | energy | 0x656350 | local |
 | LocomotionParams.tutorial_run / sprint | 7.5 / 9.0 | m/s | 0x655f70 | ev_8e6158b1 |
+| PassParams.flight_time_normal / lead | 0.5 / 0.9 | s | 0x74d930 | local pass checkpoint |
+| PassParams.flight_time_special | 0.5 / 0.7 | s | 0x74d930 | local pass checkpoint |
+| PassParams.flight_time_stat | 1.5 − 0.95·Passing/100 | s | 0x74d8e0, 0x74d930 | local pass checkpoint |
+| PassParams.non_natural_nine_time_multiplier | 1.33 | × | 0x74d840 | local pass checkpoint |
+| PassParams.forward_assist_min_speed | 8 | m/s | 0x74d2a0 | local pass checkpoint |
+| PassParams.forward_assist_probabilities | 0.5, 0.6, 0.7, 0.8, 0.9 | probability | 0x74d2a0 | local pass checkpoint |
+| PassParams.no_receiver_speed_cap | 20 | m/s | 0x74d2a0 | local pass checkpoint |
+| PassParams.fumble_table | §2.7 table | probability | 0x656600 | local pass checkpoint |
+| PassParams.fumble_dry / slippery multiplier | 0.5 / 1.0 | × | 0x656740 | local pass checkpoint |
+| PassParams.fumble_base_multiplier | 0.5 | × | 0x656740 | local pass checkpoint |
+| CatchParams.hand_segment_radii | 1.0 / 2.0 | m | 0x7362d0 | local pass checkpoint |
+| CatchParams.pickup_vertical_limit / capsule_radius | 1.0 / 0.1 | m | 0x7501b0 / 0x74fef0 | local pass checkpoint |
+| CatchParams.set_play_drop_distance | 2.5 | m | 0x6839c0 | local pass checkpoint |
+| TackleParams.strength_bonuses | 0 / 15 / 10 / 20 | stat points | 0x754680 | local tackle checkpoint |
+| TackleParams.head_on_threshold / bonus | 135 / 10 | degrees / stat points | 0x754680 | local tackle checkpoint |
+| TackleParams.tackle_ability_floor | 90 | stat | 0x754680 | local tackle checkpoint |
+| TackleParams.break_chance_setting_bases | 0, 0.10, 0.15, 0.20, 0.25, 0.30 | probability | 0x754de0 | local tackle checkpoint |
+| TackleParams.charge / handoff / sidestep_base | 0.4 / 0.5 / 0.2 | probability | 0x754de0 | local tackle checkpoint |
+| TackleParams.spill_probability | 0.25 / 0.05 / 0.02 | probability | 0x759520 | local tackle checkpoint |
+| TackleParams.big_hit_energy_thresholds | 50 / 35 | percent | 0x75a780 / 0x75a960 | local tackle checkpoint |
+| TackleParams.spill_velocity_scale | 0.75–1.25 | × | 0x759520 | local tackle checkpoint |
+| TackleParams.tackle_trigger_speed / cone | 7.5 / 90 | m/s / degrees | 0x7535f0 | local tackle checkpoint |
 
-(Pass and tackle constants pending; see §2.7 and §2.8.)
+All pass and tackle rows above are local checkpoint evidence pending REA
+reconfirmation. The complete function inventory and confidence are tracked in
+`.omc/research/functions/phys.tsv`.
 
 ---
 
@@ -569,6 +757,14 @@ These are proposed Godot `Resource` fields. Group them as `BallPhysicsParams`,
   * type code, gauge, PowerPerSecond and PowerRating;
   * accuracy index, aim offset, launch speed and elevation;
   * spin vector, state and flags.
+* **Pass / catch state:** pass type, receiver reference, predicted target
+  position (m), flight time (s), lead flag and positional-handicap factor;
+  catch candidate hand-segment reach and quality band; Handling-derived catch
+  term. These are rebuild concepts, not a required memory layout.
+* **Tackle state:** defender and carrier references, contact outcome, break
+  chance, previous-tackler count, action flags (high tackle, big hit, dive),
+  and spill/drop modifier. Player inputs include Tackling, Strength,
+  Aggression, Agility, Weight, and CrashBall/TackleBreaker/Tackle abilities.
 * **Player locomotion:**
   * current mode (2 or 3) and sprint energy (float);
   * stagger/injury timer (float, ≥ 0 while active);
@@ -595,13 +791,19 @@ Data overrides; every one is a field above:
 * the GoalKickSettings XML (already data in the original);
 * run, sprint and acceleration tables;
 * sprint-energy drain and regeneration;
-* tackle and pass tables (§2.7, §2.8).
+* pass flight-time table, target lead offsets, forward-pass assist and fumble
+  table;
+* catch reach radii, pickup limits and slippery-surface fumble scaling;
+* tackle break table, skill/strength bonuses, action-type bases, big-hit gates,
+  spill chance and spill velocity scale.
 
 Script hooks:
 * `on_ball_contact(contact)`, for custom bounce or post behaviour;
 * `on_kick_launch(kick) -> velocity, spin`;
 * `on_pass_launch`, `on_catch_resolve` and `on_tackle_resolve`, which return a
   probability override;
+* `on_fumble_resolve` and `on_ball_spill`, which can replace the deterministic
+  probability while retaining the seeded match RNG contract;
 * `wind_provider(match) -> vec3 km/h`. This must be deterministic and is
   seeded from the match RNG.
 
@@ -659,8 +861,40 @@ so that replays stay deterministic.
     part 1.
 18. The ball rigid body takes floor((acc + dt)/0.005) sub-steps per frame and
     carries the remainder over.
+19. A normal pass uses 0.5 s; a lead variant uses 0.9 s. Given a 10 m
+    horizontal target offset and equal start/target height, its horizontal
+    speed is 20 m/s. The lead target's forward offset is 3 m rather than 2 m.
+20. The Passing flight-time formula returns 1.5 s at Passing 0 and 0.55 s at
+    Passing 100. The selected fixed-time types remain 0.5 or 0.7 s regardless
+    of the attribute.
+21. At forward-assist setting 3, a forward-directed pass with forward speed
+    10 m/s is flattened with probability 0.7; with 7 m/s it is always
+    flattened. At setting 0, neither case is changed by the assist.
+22. For an Average catch and Handling 85, the dry-surface base fumble chance
+    is `0.05 × 0.5 × 0.5 = 0.0125` before the settings scale. The same setup
+    on a slippery surface yields 0.025 before that scale. Handling 39 uses
+    the `<40` column (Average row 0.25).
+23. Pickup validation rejects a ball 1.01 m above the player and accepts one
+    at 0.99 m if the hand-capsule intersection also succeeds. A pickup is
+    rejected whenever the ball is already held.
+24. Tackle strength bonus is 0 for carrier Strength 90, 15 at 89, 10 at 74
+    and 20 at 59. A head-on relative angle of 136° adds 10; 135° does not.
+25. A standard tackle at Tackling 90, carrier Strength 90, no head-on angle
+    and Tackle ability has effective skill 90 and a 0.10 skill-derived break
+    chance before the unresolved carrier modifier. This test must inject that
+    modifier as zero.
+26. A charge tackle uses base chance 0.4. A hand-off uses 0.5. A sidestep
+    uses 0.2 before the O/T power ratio and relevant modifiers.
+27. A qualifying head-on dive spills with 0.25 base chance; an eligible big
+    hit spills with 0.05; an ordinary eligible tackle spills with 0.02. On a
+    spill, a seeded roll at the lower and upper endpoints produces velocity
+    scales 0.75 and 1.25 respectively.
+28. A big-hit candidate at 50% energy with all three required stats at 80
+    passes the first gate; at 49.9% it fails. The alternate gate passes at
+    35% energy and Aggression/Tackling 70, and fails below 35%.
+29. A catch hand reach exactly 1.0 m or 2.0 m is considered within its
+    segment radius; just beyond the selected segment radius is not selected.
 
-(Pass and tackle tests pending.)
 
 ---
 
@@ -673,6 +907,12 @@ so that replays stay deterministic.
 | unk_ed64a5d8 | Resolved [I]: actor update ticks are 1/50 s (ev_6999cb56). Still to be checked: the heading PID gains | ev_fc311b1c, ev_6999cb56 |
 | unk_c58b9c6d | Kick velocity vector construction (heading, aim yaw, elevation order); kick-off target search; punt wobble | kick notes |
 | unk_796e3e94 | Kick wind-up durations T per animation, which set the gauge fill time | kick notes |
+| — | Complete open-play pass-type mapping to short, long, spin, pop and offload; exact target height and spin values | local pass checkpoint: 0x74d930, 0x74ace0, 0x642880 |
+| — | Catch random comparison direction and gating predicate; full candidate-selection score; whether all pass flight-time callers supply fatigue-adjusted Passing | local pass checkpoint: 0x738770, 0x736730, 0x608b70 |
+| — | Meaning of pass settings bytes +0xbd7 and +0x22d; names for slippery conditions 3–5 | local pass checkpoint: 0x74d2a0, 0x656740 |
+| — | Tackle carrier break modifier at carrier+0xd0; O/T power inputs are both read from defender argument in saved analysis; tackle setting byte +0xbd7 and team +0x120 meaning | local tackle checkpoint: 0x754680, 0x754de0 |
+| — | Dive reach and trigger; sidestep variants and tackle enum values 3/9/10; charge/hand-off input mapping; fend behaviour; big-hit energy cost and state-specific gate | local tackle checkpoint: 0x73bbd0, 0x7528a0, 0x75a780, 0x75a960 |
+| — | Catch/tackle function names are not yet applied to the REA target; pass/tackle residual unknowns were not written through `record_unknown` because REA access was denied for this session | this run's tool result |
 | — | Names of pitch conditions 0..5 and of task types 3, 0x14, 0x21 | [U] |
 | — | Touchline half-width used by the code. The stadium model suggests ±33.7 m; the rules lead to confirm | data |
 | — | Layout of the trailing block of `Stadium.collision` (spatial index?) | data |
@@ -697,8 +937,8 @@ so that replays stay deterministic.
 | Kick vector construction, gauge fill seconds | low | unresolved |
 | Run/sprint speeds, acceleration table, sprint energy | high for formulas; medium for how acceleration is applied | decompiled |
 | Frame timing (variable dt, speed scale) | medium | dt source unknown |
-| Passing / catching / pickup | pending | §2.7 |
-| Tackling / contact | pending | §2.8 |
+| Passing / catching / pickup | medium for flight-time and fumble table values; low for catch chance and complete pass-type mapping | saved local checkpoint; REA reconfirmation blocked in this run |
+| Tackling / contact | medium for standard break and spill constants; low for approach/dive/action mapping | saved local checkpoint; enum/formula unknowns remain |
 
 **Not covered in this pass:**
 * turning and agility;
