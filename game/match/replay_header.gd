@@ -5,7 +5,7 @@ extends RefCounted
 const _INT_KEYS: PackedStringArray = [
 	"format_version", "seed", "tick_rate", "slot_count", "axes_per_slot"
 ]
-const CURRENT_FORMAT_VERSION: int = 2
+const CURRENT_FORMAT_VERSION: int = 3
 const _STRING_KEYS: PackedStringArray = [
 	"game_version", "mod_set_hash", "action_layout_hash", "setup_fingerprint"
 ]
@@ -33,6 +33,11 @@ static func from_dict(d: Dictionary) -> ReplayHeader:
 			return null
 	if d["format_version"] < 1 or d["format_version"] > CURRENT_FORMAT_VERSION:
 		return null
+	var expected_key_count: int = 9 if d["format_version"] >= 2 else 8
+	if d.size() != expected_key_count:
+		return null
+	if d["tick_rate"] < 1 or d["slot_count"] < 1 or d["axes_per_slot"] < 0:
+		return null
 	var header: ReplayHeader = ReplayHeader.new()
 	header.format_version = d["format_version"]
 	header.game_version = d["game_version"]
@@ -48,20 +53,22 @@ static func from_dict(d: Dictionary) -> ReplayHeader:
 
 ## Serialises the header to a dictionary.
 func to_dict() -> Dictionary:
-	return {
+	var result: Dictionary = {
 		"format_version": format_version,
 		"game_version": game_version,
 		"seed": seed,
 		"mod_set_hash": mod_set_hash,
 		"action_layout_hash": action_layout_hash,
-		"setup_fingerprint": setup_fingerprint,
-		"tick_rate": tick_rate,
-		"slot_count": slot_count,
-		"axes_per_slot": axes_per_slot,
 	}
+	if format_version >= 2:
+		result["setup_fingerprint"] = setup_fingerprint
+	result["tick_rate"] = tick_rate
+	result["slot_count"] = slot_count
+	result["axes_per_slot"] = axes_per_slot
+	return result
 
 
-## True when both hashes match and the tick rate equals the simulation tick rate.
+## True when compatibility hashes and tick rate match; game_version is informational.
 func is_compatible_with(
 	p_mod_set_hash: String, p_action_layout_hash: String, p_setup_fingerprint: String
 ) -> bool:

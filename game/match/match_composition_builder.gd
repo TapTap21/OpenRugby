@@ -34,8 +34,11 @@ static func build(request: MatchCompositionRequest) -> MatchBuildResult:
 		else:
 			@warning_ignore("unsafe_cast")
 			effective_config.flow = filtered_flow
-	for error_message: String in effective_config.validate():
+	var config_errors: PackedStringArray = effective_config.validate()
+	for error_message: String in config_errors:
 		report.add_blocker(MatchReadinessReport.Capability.MATCH_CONFIG, error_message)
+	if not config_errors.is_empty():
+		result.error = ERR_INVALID_PARAMETER
 	if Engine.physics_ticks_per_second != MatchSim.TICKS_PER_SECOND:
 		report.add_blocker(
 			MatchReadinessReport.Capability.MATCH_CONFIG, "engine physics tick rate must be 60 Hz"

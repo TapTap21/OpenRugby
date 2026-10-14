@@ -19,6 +19,8 @@ enum GateState { UNRESOLVED, DISABLED, ENABLED }
 
 var kind: Kind = Kind.PLAYER_TICK_INPUT
 var sequence: int = -1
+var actor_id: StringName = &""
+var tackling_fatigue_snapshot: PlayerFatigueSnapshot
 var player_input: S2PlayerTickInput
 var ball_mode: BallState.Mode = BallState.Mode.UNRESOLVED
 var goal_kick_state: BallState.GoalKickState = BallState.GoalKickState.UNRESOLVED
@@ -111,10 +113,11 @@ static func pass(launch: PassLaunch, assist_setting: int, direction: float) -> S
 
 ## Creates a catch command with already selected candidate and gate values.
 static func catch(
-	candidate: CandidateState, failure_probability: float, gate: GateState
+	actor: StringName, candidate: CandidateState, failure_probability: float, gate: GateState
 ) -> S2RuntimeCommand:
 	var command: S2RuntimeCommand = S2RuntimeCommand.new()
 	command.kind = Kind.CATCH
+	command.actor_id = actor
 	command.catch_candidate = candidate
 	command.catch_probability = failure_probability
 	command.catch_gate = gate
@@ -122,19 +125,21 @@ static func catch(
 
 
 ## Creates a resolved fumble chance command.
-static func fumble(p_probability: float) -> S2RuntimeCommand:
+static func fumble(actor: StringName, p_probability: float) -> S2RuntimeCommand:
 	var command: S2RuntimeCommand = S2RuntimeCommand.new()
 	command.kind = Kind.FUMBLE
+	command.actor_id = actor
 	command.probability = p_probability
 	return command
 
 
 ## Creates a pickup command from caller-resolved physical intersection inputs.
 static func pickup(
-	p_ball_held: bool, vertical_separation_m: float, capsule_intersects: bool
+	actor: StringName, p_ball_held: bool, vertical_separation_m: float, capsule_intersects: bool
 ) -> S2RuntimeCommand:
 	var command: S2RuntimeCommand = S2RuntimeCommand.new()
 	command.kind = Kind.PICKUP
+	command.actor_id = actor
 	command.ball_held = p_ball_held
 	command.pickup_vertical_separation_m = vertical_separation_m
 	command.hand_capsule_intersects = capsule_intersects
@@ -143,7 +148,8 @@ static func pickup(
 
 ## Creates a tackle command with owner-resolved mappings and modifier.
 static func tackle(
-	p_defender_tackling: int,
+	p_actor_id: StringName,
+	fatigue: PlayerFatigueSnapshot,
 	p_defender_has_tackle: bool,
 	p_carrier_strength: int,
 	p_carrier_strength_ability: bool,
@@ -153,7 +159,9 @@ static func tackle(
 ) -> S2RuntimeCommand:
 	var command: S2RuntimeCommand = S2RuntimeCommand.new()
 	command.kind = Kind.TACKLE
-	command.defender_tackling = p_defender_tackling
+	command.actor_id = p_actor_id
+	command.tackling_fatigue_snapshot = _copy_fatigue(fatigue)
+	command.defender_tackling = fatigue.effective_tackling if fatigue != null else -1
 	command.defender_has_tackle = p_defender_has_tackle
 	command.carrier_strength = p_carrier_strength
 	command.carrier_strength_ability = p_carrier_strength_ability
@@ -164,10 +172,35 @@ static func tackle(
 
 
 ## Creates a ball spill command with the caller-resolved base probability.
-static func spill(p_probability: float) -> S2RuntimeCommand:
+static func spill(actor: StringName, p_probability: float) -> S2RuntimeCommand:
 	var command: S2RuntimeCommand = S2RuntimeCommand.new()
 	command.kind = Kind.SPILL
+	command.actor_id = actor
 	command.probability = p_probability
+	return command
+
+
+## Creates a tackle using the initiating tackler's owner-adjusted Tackling value.
+static func tackle_from_fatigue(
+	p_actor_id: StringName,
+	fatigue: PlayerFatigueSnapshot,
+	p_defender_has_tackle: bool,
+	p_carrier_strength: int,
+	p_carrier_strength_ability: bool,
+	p_relative_angle_degrees: float,
+	p_carrier_break_modifier: float,
+	p_out_of_position: bool = false
+) -> S2RuntimeCommand:
+	var command: S2RuntimeCommand = tackle(
+		p_actor_id,
+		fatigue,
+		p_defender_has_tackle,
+		p_carrier_strength,
+		p_carrier_strength_ability,
+		p_relative_angle_degrees,
+		p_carrier_break_modifier,
+		p_out_of_position
+	)
 	return command
 
 
@@ -183,6 +216,12 @@ func phase() -> Phase:
 ## Validates required values before command execution can mutate simulation state.
 func validate() -> PackedStringArray:
 	var detail: String = ""
+	if phase() == Phase.INTERACTION and actor_id == &"":
+		return PackedStringArray(["player-owned interaction requires stable actor id"])
+	if phase() != Phase.INTERACTION and actor_id != &"":
+		return PackedStringArray(["non-interaction command cannot carry an actor id"])
+	if not _nested_payload_matches_kind():
+		return PackedStringArray(["nested command payload does not match command kind"])
 	match kind:
 		Kind.PLAYER_TICK_INPUT:
 			if player_input == null or not player_input.is_valid():
@@ -257,7 +296,8 @@ func validate() -> PackedStringArray:
 				detail = "pickup vertical separation must be finite"
 		Kind.TACKLE:
 			if (
-				defender_tackling < 0
+				actor_id == &""
+				or defender_tackling < 0
 				or defender_tackling > 100
 				or carrier_strength < 0
 				or carrier_strength > 100
@@ -265,6 +305,10 @@ func validate() -> PackedStringArray:
 				or relative_angle_degrees < 0.0
 				or relative_angle_degrees > 180.0
 				or not is_finite(carrier_break_modifier)
+				or tackling_fatigue_snapshot == null
+				or not tackling_fatigue_snapshot.is_valid()
+				or tackling_fatigue_snapshot.player_id != actor_id
+				or defender_tackling != tackling_fatigue_snapshot.effective_tackling
 			):
 				detail = "tackle inputs must be explicitly resolved"
 		_:
@@ -272,11 +316,48 @@ func validate() -> PackedStringArray:
 	return PackedStringArray([detail]) if not detail.is_empty() else PackedStringArray()
 
 
+func _nested_payload_matches_kind() -> bool:
+	match kind:
+		Kind.PLAYER_TICK_INPUT:
+			return (
+				player_input != null
+				and wind_policy == null
+				and pass_launch == null
+				and tackling_fatigue_snapshot == null
+			)
+		Kind.BALL_STATE:
+			return (
+				player_input == null and pass_launch == null and tackling_fatigue_snapshot == null
+			)
+		Kind.PASS:
+			return (
+				player_input == null
+				and wind_policy == null
+				and pass_launch != null
+				and tackling_fatigue_snapshot == null
+			)
+		Kind.TACKLE:
+			return (
+				player_input == null
+				and wind_policy == null
+				and pass_launch == null
+				and tackling_fatigue_snapshot != null
+			)
+		_:
+			return (
+				player_input == null
+				and wind_policy == null
+				and pass_launch == null
+				and tackling_fatigue_snapshot == null
+			)
+
+
 ## Snapshot of the complete queued command, including its stable sequence.
 func snapshot() -> Dictionary:
 	return {
 		"kind": kind,
 		"sequence": sequence,
+		"actor_id": actor_id,
 		"player_input": player_input.snapshot() if player_input != null else {},
 		"ball_mode": ball_mode,
 		"goal_kick_state": goal_kick_state,
@@ -308,11 +389,107 @@ func snapshot() -> Dictionary:
 		"relative_angle_degrees": relative_angle_degrees,
 		"carrier_break_modifier": carrier_break_modifier,
 		"out_of_position": out_of_position,
+		"tackling_fatigue":
+		tackling_fatigue_snapshot.snapshot() if tackling_fatigue_snapshot != null else {},
 	}
 
 
 ## Reconstructs a queued command from a versioned replay record.
 static func from_snapshot(data: Dictionary) -> S2RuntimeCommand:
+	var required: PackedStringArray = PackedStringArray(
+		[
+			"kind",
+			"sequence",
+			"actor_id",
+			"player_input",
+			"ball_mode",
+			"goal_kick_state",
+			"wind_policy",
+			"kick_type",
+			"gauge",
+			"kicking_power",
+			"kick_accuracy",
+			"heading_radians",
+			"difficulty",
+			"ai_place",
+			"has_place_meter",
+			"place_meter_gauge",
+			"place_meter_error",
+			"pass_launch",
+			"forward_assist_setting",
+			"attack_direction",
+			"catch_candidate",
+			"catch_probability",
+			"catch_gate",
+			"probability",
+			"ball_held",
+			"pickup_vertical_separation_m",
+			"hand_capsule_intersects",
+			"defender_tackling",
+			"defender_has_tackle",
+			"carrier_strength",
+			"carrier_strength_ability",
+			"relative_angle_degrees",
+			"carrier_break_modifier",
+			"out_of_position",
+			"tackling_fatigue"
+		]
+	)
+	if data.size() != required.size():
+		return null
+	for key: String in required:
+		if not data.has(key):
+			return null
+	if (
+		typeof(data["kind"]) != TYPE_INT
+		or typeof(data["sequence"]) != TYPE_INT
+		or typeof(data["actor_id"]) != TYPE_STRING_NAME
+		or typeof(data["player_input"]) != TYPE_DICTIONARY
+		or typeof(data["wind_policy"]) != TYPE_DICTIONARY
+		or typeof(data["pass_launch"]) != TYPE_DICTIONARY
+		or typeof(data["tackling_fatigue"]) != TYPE_DICTIONARY
+	):
+		return null
+	for key: String in [
+		"ball_mode",
+		"goal_kick_state",
+		"kick_type",
+		"difficulty",
+		"forward_assist_setting",
+		"catch_candidate",
+		"catch_gate",
+		"defender_tackling",
+		"carrier_strength"
+	]:
+		if typeof(data[key]) != TYPE_INT:
+			return null
+	for key: String in [
+		"ai_place",
+		"has_place_meter",
+		"ball_held",
+		"hand_capsule_intersects",
+		"defender_has_tackle",
+		"carrier_strength_ability",
+		"out_of_position"
+	]:
+		if typeof(data[key]) != TYPE_BOOL:
+			return null
+	for key: String in [
+		"gauge",
+		"kicking_power",
+		"kick_accuracy",
+		"heading_radians",
+		"place_meter_gauge",
+		"place_meter_error",
+		"attack_direction",
+		"catch_probability",
+		"probability",
+		"pickup_vertical_separation_m",
+		"relative_angle_degrees",
+		"carrier_break_modifier"
+	]:
+		if typeof(data[key]) != TYPE_FLOAT:
+			return null
 	if not data.has("kind") or typeof(data["kind"]) != TYPE_INT:
 		return null
 	if data["kind"] < Kind.PLAYER_TICK_INPUT or data["kind"] > Kind.SPILL:
@@ -322,6 +499,7 @@ static func from_snapshot(data: Dictionary) -> S2RuntimeCommand:
 	var command: S2RuntimeCommand = S2RuntimeCommand.new()
 	command.kind = int(data["kind"])
 	command.sequence = data["sequence"]
+	command.actor_id = data["actor_id"]
 	if command.sequence < -1:
 		return null
 	command.ball_mode = int(data.get("ball_mode", BallState.Mode.UNRESOLVED))
@@ -352,10 +530,18 @@ static func from_snapshot(data: Dictionary) -> S2RuntimeCommand:
 	command.relative_angle_degrees = data.get("relative_angle_degrees", NAN)
 	command.carrier_break_modifier = data.get("carrier_break_modifier", NAN)
 	command.out_of_position = data.get("out_of_position", false)
+	command.tackling_fatigue_snapshot = _restore_fatigue(data["tackling_fatigue"])
 	command.player_input = _restore_player_input(data.get("player_input", {}))
 	command.wind_policy = _restore_wind_policy(data.get("wind_policy", {}))
 	command.pass_launch = _restore_pass_launch(data.get("pass_launch", {}))
-	return command
+	if (
+		(not data["player_input"].is_empty() and command.player_input == null)
+		or (not data["wind_policy"].is_empty() and command.wind_policy == null)
+		or (not data["pass_launch"].is_empty() and command.pass_launch == null)
+		or (not data["tackling_fatigue"].is_empty() and command.tackling_fatigue_snapshot == null)
+	):
+		return null
+	return command if command.validate().is_empty() else null
 
 
 static func _probability_valid(value: float) -> bool:
@@ -373,6 +559,22 @@ static func _copy_pass(source: PassLaunch) -> PassLaunch:
 	return copy
 
 
+static func _copy_fatigue(source: PlayerFatigueSnapshot) -> PlayerFatigueSnapshot:
+	if source == null:
+		return null
+	var copy: PlayerFatigueSnapshot = PlayerFatigueSnapshot.new()
+	copy.team_id = source.team_id
+	copy.player_id = source.player_id
+	copy.shirt_number = source.shirt_number
+	copy.fatigue_time_s = source.fatigue_time_s
+	copy.energy_cap = source.energy_cap
+	copy.energy_percent = source.energy_percent
+	copy.effective_passing = source.effective_passing
+	copy.effective_tackling = source.effective_tackling
+	copy.initial_sprint_energy = source.initial_sprint_energy
+	return copy
+
+
 static func _restore_player_input(data: Variant) -> S2PlayerTickInput:
 	if typeof(data) != TYPE_DICTIONARY:
 		return null
@@ -383,9 +585,18 @@ static func _restore_player_input(data: Variant) -> S2PlayerTickInput:
 	if fatigue == null:
 		return null
 	var result: S2PlayerTickInput = S2PlayerTickInput.new()
-	result.player_id = input_data.get("player_id", &"")
-	result.sprint_request = input_data.get("sprint_request", -1)
-	result.urgency = input_data.get("urgency", NAN)
+	if (
+		input_data.size() != 4
+		or not input_data.has("player_id")
+		or typeof(input_data["player_id"]) != TYPE_STRING_NAME
+		or typeof(input_data.get("sprint_request")) != TYPE_INT
+		or typeof(input_data.get("urgency")) != TYPE_FLOAT
+		or typeof(input_data.get("fatigue")) != TYPE_DICTIONARY
+	):
+		return null
+	result.player_id = input_data["player_id"]
+	result.sprint_request = input_data["sprint_request"]
+	result.urgency = input_data["urgency"]
 	result.fatigue_snapshot = fatigue
 	return result
 
@@ -394,10 +605,23 @@ static func _restore_fatigue(data: Variant) -> PlayerFatigueSnapshot:
 	if typeof(data) != TYPE_DICTIONARY:
 		return null
 	var fatigue_data: Dictionary = data
-	if fatigue_data.is_empty():
+	if fatigue_data.size() != 9:
+		return null
+	if (
+		typeof(fatigue_data.get("team_id")) != TYPE_STRING_NAME
+		or typeof(fatigue_data.get("player_id")) != TYPE_STRING_NAME
+		or typeof(fatigue_data.get("shirt")) != TYPE_INT
+		or typeof(fatigue_data.get("fatigue_time_s")) != TYPE_FLOAT
+		or typeof(fatigue_data.get("energy_cap")) != TYPE_FLOAT
+		or typeof(fatigue_data.get("energy_percent")) != TYPE_INT
+		or typeof(fatigue_data.get("effective_passing")) != TYPE_INT
+		or typeof(fatigue_data.get("effective_tackling")) != TYPE_INT
+		or typeof(fatigue_data.get("initial_sprint_energy")) != TYPE_FLOAT
+	):
 		return null
 	var result: PlayerFatigueSnapshot = PlayerFatigueSnapshot.new()
 	result.team_id = fatigue_data.get("team_id", &"")
+	result.player_id = fatigue_data.get("player_id", &"")
 	result.shirt_number = fatigue_data.get("shirt", 0)
 	result.fatigue_time_s = fatigue_data.get("fatigue_time_s", NAN)
 	result.energy_cap = fatigue_data.get("energy_cap", NAN)
@@ -415,12 +639,21 @@ static func _restore_wind_policy(data: Variant) -> S2WindPolicy:
 	if wind_data.is_empty():
 		return null
 	var vector: Variant = wind_data.get("vector_km_h", [])
-	if typeof(vector) != TYPE_ARRAY or vector.size() != 3:
+	if (
+		wind_data.size() != 3
+		or typeof(wind_data.get("resolved")) != TYPE_BOOL
+		or typeof(wind_data.get("enabled")) != TYPE_BOOL
+		or typeof(vector) != TYPE_ARRAY
+		or vector.size() != 3
+		or not _number_array(vector)
+	):
 		return null
 	var result: S2WindPolicy = S2WindPolicy.new()
 	result.resolved = wind_data.get("resolved", false)
 	result.enabled = wind_data.get("enabled", false)
 	result.vector_km_h = Vector3(vector[0], vector[1], vector[2])
+	if not result.is_valid():
+		return null
 	return result
 
 
@@ -433,15 +666,34 @@ static func _restore_pass_launch(data: Variant) -> PassLaunch:
 	var velocity: Variant = pass_data.get("velocity", [])
 	var target: Variant = pass_data.get("target", [])
 	if (
-		typeof(velocity) != TYPE_ARRAY
+		pass_data.size() != 4
+		or typeof(pass_data.get("flight_time_s")) != TYPE_FLOAT
+		or typeof(pass_data.get("unresolved")) != TYPE_BOOL
+		or typeof(velocity) != TYPE_ARRAY
 		or velocity.size() != 3
+		or not _number_array(velocity)
 		or typeof(target) != TYPE_ARRAY
 		or target.size() != 3
+		or not _number_array(target)
 	):
 		return null
 	var result: PassLaunch = PassLaunch.new()
 	result.velocity_m_s = Vector3(velocity[0], velocity[1], velocity[2])
 	result.target_m = Vector3(target[0], target[1], target[2])
-	result.flight_time_s = pass_data.get("flight_time_s", NAN)
-	result.unresolved = pass_data.get("unresolved", true)
+	result.flight_time_s = pass_data["flight_time_s"]
+	result.unresolved = pass_data["unresolved"]
+	if (
+		not result.velocity_m_s.is_finite()
+		or not result.target_m.is_finite()
+		or not is_finite(result.flight_time_s)
+		or result.flight_time_s < 0.0
+	):
+		return null
 	return result
+
+
+static func _number_array(value: Array) -> bool:
+	for component: Variant in value:
+		if typeof(component) != TYPE_FLOAT and typeof(component) != TYPE_INT:
+			return false
+	return true

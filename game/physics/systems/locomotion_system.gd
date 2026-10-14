@@ -43,7 +43,7 @@ func tick(sim: MatchSim) -> void:
 		return
 	if not _initial_inputs_available:
 		for player: PlayerMotionState in players:
-			if not _updated_player_ids.has(player.player_id):
+			if player.on_pitch and not _updated_player_ids.has(player.player_id):
 				var detail: String = (
 					"missing per-tick fatigue/movement input for %s" % player.player_id
 				)
@@ -55,6 +55,8 @@ func tick(sim: MatchSim) -> void:
 	players.sort_custom(_player_less)
 	var seen_player_ids: Dictionary[StringName, bool] = {}
 	for player: PlayerMotionState in players:
+		if not player.on_pitch:
+			continue
 		if player.player_id == &"" or seen_player_ids.has(player.player_id):
 			unresolved_inputs += PackedStringArray(
 				["locomotion player ids must be nonempty and unique"]
@@ -241,6 +243,7 @@ func _apply_player_input(input: S2PlayerTickInput) -> bool:
 			continue
 		if (
 			player.team_id != input.fatigue_snapshot.team_id
+			or player.player_id != input.fatigue_snapshot.player_id
 			or player.shirt_number != input.fatigue_snapshot.shirt_number
 		):
 			return false
@@ -257,6 +260,7 @@ func _apply_player_input(input: S2PlayerTickInput) -> bool:
 func _copy_fatigue(source: PlayerFatigueSnapshot) -> PlayerFatigueSnapshot:
 	var copy: PlayerFatigueSnapshot = PlayerFatigueSnapshot.new()
 	copy.team_id = source.team_id
+	copy.player_id = source.player_id
 	copy.shirt_number = source.shirt_number
 	copy.fatigue_time_s = source.fatigue_time_s
 	copy.energy_cap = source.energy_cap

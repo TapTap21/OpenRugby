@@ -19,6 +19,7 @@ func is_valid() -> bool:
 		and urgency <= 1.0
 		and fatigue_snapshot != null
 		and fatigue_snapshot.is_valid()
+		and fatigue_snapshot.player_id == player_id
 	)
 
 

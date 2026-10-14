@@ -7,6 +7,9 @@
 - **Clock boundary:** locomotion integrates at S1's 60 Hz (`dt=1/60`) using per-second rates derived from RE 06's 50 Hz actor model. The separate set-piece 50 Hz / 60 Hz motion playback question remains open (RE review C11); S2 does not convert it.
 - **Ball solver:** integer accumulator adds 200 against threshold 60 only when the post-action ball is free-flight/rolling and match lifecycle is active. Held/attached/frozen paths leave ball state and accumulator unchanged. This is the explicit provisional S2 policy from S2 spec §3–4, not recovered Classic gating.
 - **Mod composition:** Classic defaults and modded matches instantiate the same S2 system set. S2 data is supplied through typed Resource references; no alternate Classic/mod implementation path.
+- **Interaction ordering:** player-owned interaction commands carry a stable `actor_id`; the interaction phase sorts by actor ID and then unique enqueue sequence. For tackle and spill, the actor is the action owner/initiating tackler. Locomotion and ball phases retain enqueue-sequence order.
+- **On-pitch boundary:** `PlayerMotionState.on_pitch` is caller-owned and included in player setup snapshots. Each on-pitch player requires a per-tick fatigue/movement snapshot; off-pitch initialized players are not advanced by locomotion.
+- **Replay schema:** replay format v3 records actor identity and player-bound fatigue provenance on commands. Compatibility follows S1-core §3.2: mod-set, action-layout and setup fingerprints plus tick rate; `game_version` remains informational. Accepted v1/v2 headers and logs remain parseable and serializable in their original layouts (v1 omits the setup fingerprint and runtime frame data; v2 includes the setup fingerprint and runtime command/output frame data). `MatchReplay.run()` is v3-only because S2 command/output and setup-fingerprint semantics require v3; historical v1/v2 playback remains unsupported.
 
 ## Progress
 
@@ -18,6 +21,7 @@
 
 - S1 has no player/team roster match-state or fatigue owner yet. S2 inputs must remain typed/injected; no profiles or fatigue values are fabricated.
 - PID gains, pass/catch candidate policy and mappings, wind policy, several tackle action bindings, place-kick meter, and stadium contact geometry remain unresolved per S2 spec §8. Dependent paths must report unavailable until injected.
+- **Fatigue owner lifecycle is blocked at the S1 boundary.** `SimSystem` currently exposes only `tick(sim)`; `S2RuntimePort.enqueue()` rejects calls during a tick, while `MatchRunner` captures queued inputs before `MatchSim.tick()`. There is no typed pre-system capture/post-success owner participant with checkpoint/restore and replay recording. Required S1 boundary: typed `capture_inputs(tick)` before systems (producing per-on-pitch-player immutable snapshots), `commit_owner_tick(tick)` only after all systems succeed, complete owner checkpoint/restore, and staged-input recording or deterministic regeneration/checking in replay. Do not emulate this by reopening general enqueue during arbitrary system execution or by advancing fatigue in S2.
 
 ## Implemented checkpoint
 
@@ -47,13 +51,13 @@
 
 ## Verification status
 
-- `gdlint .`: PASS — `Success: no problems found`.
-- Targeted `gdformat --check --line-length 100` on 30 changed GDScript files: PASS — `30 files would be left unchanged`.
-- `scripts/hygiene.sh`: PASS — `hygiene: ok`.
-- `git diff --check`: PASS — exit 0, no output. New files also passed `git diff --no-index --check /dev/null <file>` with no output.
-- Git staging was unavailable: `git add -A` could not create `.git/worktrees/s2-implementation/index.lock` because the filesystem is read-only; an orchestrator with writable Git metadata must commit this slice.
-- No tests or Godot commands were run. Independent test API reconciliation is still incomplete.
-- No Godot invocation was made, so no safety-gate/invocation pair applies.
+- `gdlint .`: PASS — no problems found.
+- Targeted `gdformat --check --line-length 100`: PASS — 12 changed GDScript files unchanged.
+- `scripts/hygiene.sh`: PASS — hygiene ok.
+- `git diff --check`: PASS — no whitespace errors.
+- No tests or Godot commands were run. Test authoring/reconciliation remains separate.
+- Commit was not created: `git add` could not create the worktree index lock because the shared
+  `.git` metadata is read-only in this runner. The reviewed changes remain uncommitted.
 
 ## Runtime composition and replay update
 
@@ -70,11 +74,14 @@
 - A caller must initialize ball body pose, `BallMode`, and `GoalKickState` before the first tick.
   Ordinary play is explicitly supplied as `GoalKickState.OFF`; an active goal kick needs an explicit
   wind policy. No default state is applied to unblock launch.
-- Replay format v2 stores per-frame command inputs and typed outputs and adds a setup fingerprint
+- Replay format v3 stores per-frame command inputs and typed outputs and adds a setup fingerprint
   to `ReplayHeader`. The fingerprint covers effective config/resources, caller and extension system
   setup, ordered extension configuration, action-layout and mod hashes, ball/player/environment
-  setup, contact providers, resolved wind policy, and tick rate. Replay rejects older headers and
-  mismatched fingerprints.
+  setup, contact providers, resolved wind policy, and tick rate. `MatchReplay.run()` rejects older
+  headers and mismatched fingerprints. V1/v2 structures remain accepted for parsing and
+  serialization: v1 omits the setup fingerprint and runtime frame data; v2 includes the fingerprint
+  and runtime command/output frame data. Their historical playback limitation remains explicit:
+  S2 match playback requires v3 command/output and setup-fingerprint semantics.
 - Tick execution checkpoints every injected system, contact source and contact solver, ball and
   player state, `SimRng`, queued commands, prior outputs and sequence state. A rejected command or
   failed later solver substep restores the complete pre-tick state. Injected dependencies must
@@ -87,3 +94,25 @@
 These checks do not establish merge readiness. The geometry provider, contract-complete LCP solver,
 and caller-owned action/player inputs remain unavailable, and tests are still gated on independent
 test API reconciliation.
+
+## Composition review fixes
+
+- `MatchSim.snapshot()` includes previous-frame button and axis arrays because edge queries use
+  `_previous`; rollback continues to restore both frames.
+- Tackle commands are created from `PlayerFatigueSnapshot.effective_tackling`. Stable fatigue
+  `player_id` must match the actor, the serialized Tackling value must match that owner-adjusted
+  value, and S2 does not reapply fatigue penalties.
+- Replay command/result decoding validates required fields, primitive and nested types, enum/range
+  bounds, and supported payload/action shapes before queueing. Catch outputs require a resolved
+  `CAUGHT` or `DROPPED` outcome; fumble outputs require a resolved `CAUGHT` or `FUMBLED` outcome.
+  Both require bounded finite probability except catch's `NAN` sentinels for `DROPPED` (no
+  candidate) and `CAUGHT` (gate disabled); fumble probability must be finite. Tackle
+  outputs require finite break probability and
+  unused spill sentinels; spill outputs require finite spill probability and velocity bounds with
+  an unused break sentinel. Processed replay frames require contiguous global command sequences;
+  outputs must match a command's sequence and kind and follow canonical phase/actor order. Replay
+  accepts matching empty action-layout hashes, preserving S1's default `InputSource` contract, and
+  still stops at the first frame after match completion. `game_version` remains informational.
+- Replay does not contain a whole-match state hash per frame. Determinism tests should compare
+  `MatchSim.state_hash()` per tick when their fixture supports it; hashes are not added to the file
+  format without a spec decision.

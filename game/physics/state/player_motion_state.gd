@@ -3,6 +3,7 @@ extends RefCounted
 ## Match-local mutable locomotion state; fatigue remains owned by the player/match layer.
 
 var player_id: StringName
+var on_pitch: bool = true
 var initialized: bool = false
 var team_id: StringName
 var shirt_number: int = 0
@@ -29,6 +30,7 @@ var fatigue_snapshot: PlayerFatigueSnapshot
 func snapshot() -> Dictionary:
 	return {
 		"player_id": player_id,
+		"on_pitch": on_pitch,
 		"initialized": initialized,
 		"team_id": team_id,
 		"shirt": shirt_number,
@@ -56,6 +58,7 @@ func snapshot() -> Dictionary:
 func duplicate_state() -> PlayerMotionState:
 	var copy: PlayerMotionState = PlayerMotionState.new()
 	copy.player_id = player_id
+	copy.on_pitch = on_pitch
 	copy.initialized = initialized
 	copy.team_id = team_id
 	copy.shirt_number = shirt_number
@@ -84,6 +87,7 @@ func _duplicate_fatigue(source: PlayerFatigueSnapshot) -> PlayerFatigueSnapshot:
 		return null
 	var copy: PlayerFatigueSnapshot = PlayerFatigueSnapshot.new()
 	copy.team_id = source.team_id
+	copy.player_id = source.player_id
 	copy.shirt_number = source.shirt_number
 	copy.fatigue_time_s = source.fatigue_time_s
 	copy.energy_cap = source.energy_cap

@@ -133,10 +133,10 @@ func enqueue_replay_commands(values: Array[Dictionary]) -> bool:
 		var command: S2RuntimeCommand = S2RuntimeCommand.from_snapshot(value)
 		if command == null or not command.validate().is_empty():
 			return false
-		if command.sequence < next_sequence:
+		if command.sequence != next_sequence:
 			return false
 		restored.append(command)
-		next_sequence = command.sequence + 1
+		next_sequence += 1
 	for command: S2RuntimeCommand in restored:
 		_pending_commands.append(command)
 	_next_sequence = next_sequence
@@ -312,6 +312,10 @@ func _restore_outputs(output_data: Array[Dictionary]) -> void:
 
 
 func _command_less(left: S2RuntimeCommand, right: S2RuntimeCommand) -> bool:
+	if left.phase() != right.phase():
+		return left.phase() < right.phase()
+	if left.phase() == S2RuntimeCommand.Phase.INTERACTION and left.actor_id != right.actor_id:
+		return String(left.actor_id) < String(right.actor_id)
 	return left.sequence < right.sequence
 
 

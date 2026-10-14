@@ -58,6 +58,16 @@ decisions; S2 reports a physical contact result and does not decide whether the 
   belongs to S2 systems/state objects, never to shared profile Resources.
 - S2 emits typed results through system output/queued match triggers. It does not call the EventBus;
   `MatchRunner` relays cross-feature events after the full tick.
+- Each player-owned interaction command carries a stable `actor_id` supplied by the owner. Tackle
+  and spill use the action owner/initiating tackler. Interactions are ordered by actor ID, then
+  unique global enqueue sequence; locomotion and ball commands remain sequence ordered.
+- The owner-supplied `PlayerFatigueSnapshot.effective_tackling` is the fatigue-adjusted Tackling
+  query input. `S2RuntimeCommand.tackle()` requires that typed snapshot and checks the serialized
+  effective value and stable `player_id` against the action owner, so the S2 resolver consumes the
+  adjusted value once and rejects missing or mismatched provenance.
+- `PlayerMotionState.on_pitch` is the explicit active-player boundary. On-pitch initialized players
+  require per-tick locomotion snapshots; off-pitch initialized players keep stable setup identity
+  but do not require a per-tick update or receive locomotion advancement.
 - The S2 integrator owns the ball state and runs after deterministic input/state preparation. S2
   must document the concrete system registration order in its implementation PR. No separate S2
   system may depend on incidental insertion order within a single tick.
@@ -467,11 +477,18 @@ mapping, pass/catch selection, fatigue ownership, wind derivation, or goal-kick 
 requires an owner-supplied wind policy. Extension wind providers also return an explicit
 `S2WindPolicy`; the builder never turns a vector into an enabled/disabled decision.
 
-Replay header format 2 stores a setup fingerprint over effective config and resources, ordered
+Replay header format v3 stores a setup fingerprint over effective config and resources, ordered
 systems, extension point and hook configuration, mod/action-layout identity, environment and player
-setup, contact providers, resolved wind policy, and tick rate. Each input frame also stores ordered
-command records and the corresponding typed outputs. A replay requires matching setup identity and
-checks each frame's command results.
+setup, contact providers, resolved wind policy, and tick rate. Each input frame stores ordered v3
+command records and their corresponding typed outputs, including the actor identity and player-bound
+fatigue provenance required by S2. `MatchReplay.run()` accepts only v3 logs: S2 command/output and
+setup-fingerprint semantics are defined by v3, so v1/v2 records cannot run an S2 match.
+
+Parsing and serializing accepted historical v1/v2 structures remains supported for round-tripping.
+V1 headers omit `setup_fingerprint`, and v1 logs omit runtime command/output frame data. V2 headers
+include `setup_fingerprint`; v2 logs include runtime command/output frame data using the v2
+structure. The fingerprint retains the same setup-identity meaning described above; this policy
+does not add a migration or imply that historical v2 commands satisfy the v3 S2 contract.
 
 Each S2 tick is transactional across all registered systems, contact source and solver, `SimRng`,
 pending commands and results, players, interaction outcomes, ball pose and solver accumulator. A

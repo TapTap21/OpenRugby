@@ -24,8 +24,18 @@ static func from_bytes(bytes: PackedByteArray) -> InputLog:
 	var raw: Variant = bytes_to_var(bytes.slice(_MAGIC.size()))
 	if typeof(raw) != TYPE_DICTIONARY:
 		return null
+	# var_to_bytes is canonical for the parsed Variant; equality proves the parser consumed all
+	# bytes rather than accepting a valid prefix followed by unrelated or truncated data.
+	if var_to_bytes(raw) != bytes.slice(_MAGIC.size()):
+		return null
 	var d: Dictionary = raw
 	if not d.has("header") or typeof(d["header"]) != TYPE_DICTIONARY:
+		return null
+	var raw_header: Dictionary = d["header"]
+	if not raw_header.has("format_version") or typeof(raw_header["format_version"]) != TYPE_INT:
+		return null
+	var expected_keys: int = 4 if raw_header["format_version"] >= 2 else 3
+	if d.size() != expected_keys:
 		return null
 	if not d.has("buttons") or typeof(d["buttons"]) != TYPE_PACKED_INT64_ARRAY:
 		return null
@@ -60,6 +70,7 @@ static func from_bytes(bytes: PackedByteArray) -> InputLog:
 		for runtime_frame: Variant in runtime:
 			if (
 				typeof(runtime_frame) != TYPE_DICTIONARY
+				or runtime_frame.size() != 2
 				or not runtime_frame.has("commands")
 				or typeof(runtime_frame["commands"]) != TYPE_ARRAY
 				or not runtime_frame.has("outputs")
@@ -145,8 +156,9 @@ func to_bytes() -> PackedByteArray:
 		"header": header.to_dict(),
 		"buttons": _buttons,
 		"axes": _axes,
-		"runtime": _runtime_frames,
 	}
+	if header.format_version >= 2:
+		d["runtime"] = _runtime_frames
 	var out: PackedByteArray = _MAGIC.duplicate()
 	out.append_array(var_to_bytes(d))
 	return out

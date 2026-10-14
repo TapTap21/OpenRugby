@@ -15,10 +15,14 @@ func validate() -> PackedStringArray:
 	if not player.initialized or player.sprint_request < 0 or player.sprint_request > 1:
 		errors.append("player motion and initial sprint request are unresolved")
 	if (
-		player.fatigue_snapshot == null
-		or not player.fatigue_snapshot.is_valid()
-		or player.fatigue_snapshot.team_id != player.team_id
-		or player.fatigue_snapshot.shirt_number != player.shirt_number
+		player.on_pitch
+		and (
+			player.fatigue_snapshot == null
+			or not player.fatigue_snapshot.is_valid()
+			or player.fatigue_snapshot.team_id != player.team_id
+			or player.fatigue_snapshot.player_id != player.player_id
+			or player.fatigue_snapshot.shirt_number != player.shirt_number
+		)
 	):
 		errors.append("player requires a matching valid pre-advance fatigue snapshot")
 	if (
@@ -39,10 +43,13 @@ func validate() -> PackedStringArray:
 		or (
 			player.sprint_energy_initialized
 			and (
-				player.fatigue_snapshot == null
+				(player.on_pitch and player.fatigue_snapshot == null)
 				or not is_finite(player.sprint_energy)
 				or player.sprint_energy < -1.0
-				or player.sprint_energy > player.fatigue_snapshot.energy_cap
+				or (
+					player.fatigue_snapshot != null
+					and player.sprint_energy > player.fatigue_snapshot.energy_cap
+				)
 			)
 		)
 	):

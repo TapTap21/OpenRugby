@@ -51,11 +51,37 @@ func start(
 	request.extension_points = extension_points
 	request.s2 = resolved_port
 	last_build_result = MatchCompositionBuilder.build(request)
+	if config == null:
+		if (
+			last_build_result
+			. readiness
+			. details_for(MatchReadinessReport.Capability.MATCH_CONFIG)
+			. is_empty()
+		):
+			last_build_result.readiness.add_blocker(
+				MatchReadinessReport.Capability.MATCH_CONFIG,
+				"original match configuration is missing"
+			)
+		last_build_result.error = ERR_INVALID_PARAMETER
+	else:
+		var original_config_errors: PackedStringArray = config.validate()
+		var reported_config_errors: PackedStringArray = last_build_result.readiness.details_for(
+			MatchReadinessReport.Capability.MATCH_CONFIG
+		)
+		for error_message: String in original_config_errors:
+			if not reported_config_errors.has(error_message):
+				last_build_result.readiness.add_blocker(
+					MatchReadinessReport.Capability.MATCH_CONFIG,
+					"original match configuration is invalid: %s" % error_message
+				)
+		if not original_config_errors.is_empty():
+			last_build_result.error = ERR_INVALID_PARAMETER
 	if source == null:
 		last_build_result.readiness.add_blocker(
 			MatchReadinessReport.Capability.MATCH_CONFIG, "input source is missing"
 		)
-		last_build_result.error = ERR_UNCONFIGURED
+		if last_build_result.error != ERR_INVALID_PARAMETER:
+			last_build_result.error = ERR_UNCONFIGURED
 	if not last_build_result.is_success():
 		sim = null
 		input_log = null

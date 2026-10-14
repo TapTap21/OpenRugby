@@ -3,6 +3,7 @@ extends RefCounted
 ## Immutable player/match-owned fatigue inputs captured before that layer advances this tick.
 
 var team_id: StringName
+var player_id: StringName
 var shirt_number: int = 0
 var fatigue_time_s: float = NAN
 var energy_cap: float = NAN
@@ -15,7 +16,10 @@ var initial_sprint_energy: float = NAN
 ## True only when all required owner values have been injected as finite data.
 func is_valid() -> bool:
 	return (
-		is_finite(fatigue_time_s)
+		team_id != &""
+		and player_id != &""
+		and shirt_number >= 0
+		and is_finite(fatigue_time_s)
 		and fatigue_time_s >= 0.0
 		and is_finite(energy_cap)
 		and is_finite(initial_sprint_energy)
@@ -36,6 +40,7 @@ func is_valid() -> bool:
 func snapshot() -> Dictionary:
 	return {
 		"team_id": team_id,
+		"player_id": player_id,
 		"shirt": shirt_number,
 		"fatigue_time_s": fatigue_time_s,
 		"energy_cap": energy_cap,

@@ -82,8 +82,14 @@ func tick(frame: InputFrame) -> void:
 	var previous_current: InputFrame = null
 	var previous_previous: InputFrame = null
 	var original_tick: int = tick_count
-	var original_rng_state: int = rng.get_state()
+	var original_rng: SimRng = rng
+	var original_rng_state: int = original_rng.get_state()
 	var original_triggers: Array[StringName] = _pending_triggers.duplicate()
+	var original_clock: MatchClock = clock
+	var original_clock_state: Dictionary = _clock_state(clock)
+	var original_flow: MatchStateMachine = flow
+	var original_flow_state: Dictionary = _flow_state(flow)
+	var original_finished: bool = _finished
 	if s2_runtime_port != null:
 		for system: SimSystem in _systems:
 			var checkpoint: SimDependencyCheckpoint = system.transaction_checkpoint()
@@ -115,11 +121,17 @@ func tick(frame: InputFrame) -> void:
 				s2_runtime_port.fail_tick(
 					"%s failed to restore its tick checkpoint" % _systems[index].system_id()
 				)
+		rng = original_rng
 		rng.set_state(original_rng_state)
 		tick_count = original_tick
 		_current.copy_from(previous_current)
 		_previous.copy_from(previous_previous)
 		_pending_triggers = original_triggers
+		clock = original_clock
+		_restore_clock_state(clock, original_clock_state)
+		flow = original_flow
+		_restore_flow_state(flow, original_flow_state)
+		_finished = original_finished
 		s2_runtime_port.rollback_tick()
 		last_tick_succeeded = false
 		return
@@ -202,9 +214,10 @@ func snapshot() -> Dictionary:
 		"pending_triggers": pending,
 		"input_buttons": _current.buttons.duplicate(),
 		"input_axes": _current.axes.duplicate(),
+		"previous_input_buttons": _previous.buttons.duplicate(),
+		"previous_input_axes": _previous.axes.duplicate(),
 		"systems": systems_data,
 		"s2_runtime": s2_runtime_port.snapshot() if s2_runtime_port != null else {},
-		"last_tick_succeeded": last_tick_succeeded,
 	}
 
 
@@ -212,6 +225,38 @@ func _copy_frame(source: InputFrame) -> InputFrame:
 	var copy: InputFrame = InputFrame.new(source.slot_count, source.axes_per_slot)
 	copy.copy_from(source)
 	return copy
+
+
+func _clock_state(source: MatchClock) -> Dictionary:
+	return {
+		"period": source.period,
+		"period_count": source.period_count,
+		"period_ticks": source.period_ticks,
+		"elapsed_ticks": source.elapsed_ticks,
+		"game_seconds_per_period": source.game_seconds_per_period,
+	}
+
+
+func _restore_clock_state(target: MatchClock, state: Dictionary) -> void:
+	target.period = state["period"]
+	target.period_count = state["period_count"]
+	target.period_ticks = state["period_ticks"]
+	target.elapsed_ticks = state["elapsed_ticks"]
+	target.game_seconds_per_period = state["game_seconds_per_period"]
+
+
+func _flow_state(source: MatchStateMachine) -> Dictionary:
+	return {
+		"config": source.config,
+		"current": source.current,
+		"ticks_in_state": source.ticks_in_state,
+	}
+
+
+func _restore_flow_state(target: MatchStateMachine, state: Dictionary) -> void:
+	target.config = state["config"]
+	target.current = state["current"]
+	target.ticks_in_state = state["ticks_in_state"]
 
 
 ## Lowercase hex SHA-256 of the serialised snapshot.
