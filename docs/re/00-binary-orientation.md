@@ -213,3 +213,55 @@ python3 tools/re/dump_wine_process.py \
 
 Outputs: `Rugby08_unpacked.exe`, `Rugby08_raw_400000-1463000.bin`,
 `Rugby08_dump_report.json`, `wine.log` (all git-ignored).
+
+## 10. SecuROM trampolines and the repair
+
+**Observed:** `.text` contains about 2,300 six-byte `jmp dword ptr [imm32]`
+(`FF 25`) instructions whose pointer lies in the SecuROM data block
+(`0x1000000-0x1453000`). The pointed-at dword holds a stub address. Ghidra and
+other analysers cannot follow the indirect jump, so the surrounding code decompiles
+with holes or dead ends. Two distinct mechanisms share this encoding:
+
+| Kind | Count | What the stub holds |
+|---|---|---|
+| Stolen instructions (mid-function) | 246 | 1 relocated instruction, then a direct `jmp` back to trampoline + 6 |
+| Function-entry redirect | about 2,070 | the whole relocated function body, with an obfuscated prologue and no jmp-back |
+| Obfuscated reads (too long to inline) | 7 | 2-5 relocated instructions (more than 6 bytes) |
+
+**Repair:** `tools/re/inline_securom.py` does two things, all at fixed addresses
+(same size and layout as the input).
+
+1. *Inline.* Where the stub's jmp-back equals trampoline + 6 and the code fits in 6
+   bytes, the stolen instruction is written back (relative call/jmp/jcc are
+   re-encoded for the new address) and padded with `0x90`. 246 sites.
+2. *Redirect* (`--redirect`, default on). Every other trampoline whose stub pointer
+   is a code address (2,076 sites: the function-entry redirects, the mismatched
+   jmp-back cases and the 7 obfuscated reads) becomes `E9 rel32` to the stub plus one
+   `NOP`, so analysers follow it into the relocated body. The stub range
+   (VA `0x1057000-0x1452000`, measured from the lowest and highest stub) is split out
+   of `.data` into its own `.secu` section (code, execute, read), with `.data` before
+   and `.data2` after it. Raw and virtual offsets are unchanged, `SizeOfCode` and
+   `SizeOfInitializedData` are adjusted, and the file size is the same.
+
+Three matches (`0x43fbb4`, `0x896508`, `0x896ace`) were left alone: disassembling their
+functions linearly shows they fall inside a `mov eax,[ebp-disp]` displacement, so they
+are not instructions. Redirected stubs end in `ret` or a `jmp` back into `.text`; a few
+jump back to trampoline + 7, which is why the stub is not simply inlined.
+
+**Obfuscated prologues (inferred, not removed):** many relocated bodies start with
+`push ebp; dec dword ptr [counter]; je <label in the SecuROM block>; mov ebp,esp ...`,
+where `counter` is a dword in the SecuROM data. This looks like a per-function call
+countdown: the Nth call takes the branch into SecuROM code, presumably a protection
+or integrity trigger check. On the normal path it is a no-op for game logic, so
+decompiler output can ignore the `dec`/`je` pair. Some prologues instead load `ebp`
+from a SecuROM address and subtract a constant before the `dec`. They are left as
+found.
+
+```
+python3 tools/re/inline_securom.py --in .omc/research/unpacked/Rugby08_unpacked.exe \
+  --out .omc/research/unpacked/Rugby08_fixed.exe \
+  --report .omc/research/unpacked/securom_fix_report.json
+```
+
+Requires `capstone`. Outputs are git-ignored. The repaired exe is for analysis only
+and was not test-run.
