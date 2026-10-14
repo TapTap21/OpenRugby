@@ -1052,12 +1052,19 @@ def export_gltf(
     b.doc["scenes"][0]["nodes"] = root_children + (
         [b.doc["skins"][skin_index]["skeleton"]] if skin_index is not None else []
     )
-    if not b.doc["materials"]:
-        del b.doc["materials"]
     bin_path = out_path.with_suffix(".bin")
-    b.doc["buffers"] = [{"uri": bin_path.name, "byteLength": len(b.bin)}]
+    if b.bin:
+        b.doc["buffers"] = [{"uri": bin_path.name, "byteLength": len(b.bin)}]
+    if not b.doc["scenes"][0]["nodes"]:
+        del b.doc["scenes"][0]["nodes"]
+    # glTF 2.0 forbids empty top-level arrays and zero-length buffers.
+    for key in [k for k, v in b.doc.items() if isinstance(v, list) and not v]:
+        del b.doc[key]
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    bin_path.write_bytes(bytes(b.bin))
+    if b.bin:
+        bin_path.write_bytes(bytes(b.bin))
+    elif bin_path.exists():
+        bin_path.unlink()
     out_path.write_text(json.dumps(b.doc, indent=1))
     return summary
 
