@@ -9,10 +9,6 @@ device = -1
 axis = 1
 axis_value = -1.0
 
-[sub_resource type="InputEventKey" id="ev2"]
-device = -1
-physical_keycode = 87
-
 [sub_resource type="InputEventKey" id="ev3"]
 device = -1
 physical_keycode = 4194320
@@ -22,19 +18,15 @@ script = ExtResource("2_action")
 id = &"move_up"
 context = 0
 display_name_key = "INPUT_ACTION_MOVE_UP"
-deadzone = 0.2
+deadzone = 0.5
 gamepad_events = Array[InputEvent]([SubResource("ev1")])
-keyboard_events = Array[InputEvent]([SubResource("ev2"), SubResource("ev3")])
+keyboard_events = Array[InputEvent]([SubResource("ev3")])
 provisional = true
 
 [sub_resource type="InputEventJoypadMotion" id="ev4"]
 device = -1
 axis = 1
 axis_value = 1.0
-
-[sub_resource type="InputEventKey" id="ev5"]
-device = -1
-physical_keycode = 83
 
 [sub_resource type="InputEventKey" id="ev6"]
 device = -1
@@ -45,19 +37,15 @@ script = ExtResource("2_action")
 id = &"move_down"
 context = 0
 display_name_key = "INPUT_ACTION_MOVE_DOWN"
-deadzone = 0.2
+deadzone = 0.5
 gamepad_events = Array[InputEvent]([SubResource("ev4")])
-keyboard_events = Array[InputEvent]([SubResource("ev5"), SubResource("ev6")])
+keyboard_events = Array[InputEvent]([SubResource("ev6")])
 provisional = true
 
 [sub_resource type="InputEventJoypadMotion" id="ev7"]
 device = -1
 axis = 0
 axis_value = -1.0
-
-[sub_resource type="InputEventKey" id="ev8"]
-device = -1
-physical_keycode = 65
 
 [sub_resource type="InputEventKey" id="ev9"]
 device = -1
@@ -68,19 +56,15 @@ script = ExtResource("2_action")
 id = &"move_left"
 context = 0
 display_name_key = "INPUT_ACTION_MOVE_LEFT"
-deadzone = 0.2
+deadzone = 0.5
 gamepad_events = Array[InputEvent]([SubResource("ev7")])
-keyboard_events = Array[InputEvent]([SubResource("ev8"), SubResource("ev9")])
+keyboard_events = Array[InputEvent]([SubResource("ev9")])
 provisional = true
 
 [sub_resource type="InputEventJoypadMotion" id="ev10"]
 device = -1
 axis = 0
 axis_value = 1.0
-
-[sub_resource type="InputEventKey" id="ev11"]
-device = -1
-physical_keycode = 68
 
 [sub_resource type="InputEventKey" id="ev12"]
 device = -1
@@ -91,9 +75,9 @@ script = ExtResource("2_action")
 id = &"move_right"
 context = 0
 display_name_key = "INPUT_ACTION_MOVE_RIGHT"
-deadzone = 0.2
+deadzone = 0.5
 gamepad_events = Array[InputEvent]([SubResource("ev10")])
-keyboard_events = Array[InputEvent]([SubResource("ev11"), SubResource("ev12")])
+keyboard_events = Array[InputEvent]([SubResource("ev12")])
 provisional = true
 
 [sub_resource type="InputEventJoypadMotion" id="ev13"]
@@ -103,7 +87,7 @@ axis_value = 1.0
 
 [sub_resource type="InputEventKey" id="ev14"]
 device = -1
-physical_keycode = 4194325
+physical_keycode = 32
 
 [sub_resource type="Resource" id="act_sprint"]
 script = ExtResource("2_action")
@@ -121,7 +105,7 @@ button_index = 9
 
 [sub_resource type="InputEventKey" id="ev16"]
 device = -1
-physical_keycode = 81
+physical_keycode = 65
 
 [sub_resource type="Resource" id="act_pass_left"]
 script = ExtResource("2_action")
@@ -139,7 +123,7 @@ button_index = 10
 
 [sub_resource type="InputEventKey" id="ev18"]
 device = -1
-physical_keycode = 69
+physical_keycode = 68
 
 [sub_resource type="Resource" id="act_pass_right"]
 script = ExtResource("2_action")
@@ -153,11 +137,11 @@ provisional = true
 
 [sub_resource type="InputEventJoypadButton" id="ev19"]
 device = -1
-button_index = 3
+button_index = 2
 
 [sub_resource type="InputEventKey" id="ev20"]
 device = -1
-physical_keycode = 75
+physical_keycode = 83
 
 [sub_resource type="Resource" id="act_kick"]
 script = ExtResource("2_action")
@@ -175,7 +159,7 @@ button_index = 2
 
 [sub_resource type="InputEventKey" id="ev22"]
 device = -1
-physical_keycode = 74
+physical_keycode = 83
 
 [sub_resource type="Resource" id="act_tackle"]
 script = ExtResource("2_action")
@@ -187,13 +171,14 @@ gamepad_events = Array[InputEvent]([SubResource("ev21")])
 keyboard_events = Array[InputEvent]([SubResource("ev22")])
 provisional = true
 
-[sub_resource type="InputEventJoypadButton" id="ev23"]
+[sub_resource type="InputEventJoypadMotion" id="ev23"]
 device = -1
-button_index = 0
+axis = 4
+axis_value = 1.0
 
 [sub_resource type="InputEventKey" id="ev24"]
 device = -1
-physical_keycode = 76
+physical_keycode = 4194325
 
 [sub_resource type="Resource" id="act_switch_player"]
 script = ExtResource("2_action")
@@ -223,6 +208,10 @@ gamepad_events = Array[InputEvent]([SubResource("ev25")])
 keyboard_events = Array[InputEvent]([SubResource("ev26")])
 provisional = true
 
+[sub_resource type="InputEventJoypadButton" id="ev_accept"]
+device = -1
+button_index = 2
+
 [sub_resource type="InputEventKey" id="ev27"]
 device = -1
 physical_keycode = 4194309
@@ -237,17 +226,21 @@ id = &"ui_accept"
 context = 1
 display_name_key = "INPUT_ACTION_UI_ACCEPT"
 deadzone = 0.2
-gamepad_events = Array[InputEvent]([SubResource("ev23")])
-keyboard_events = Array[InputEvent]([SubResource("ev27"), SubResource("ev28")])
+gamepad_events = Array[InputEvent]([SubResource("ev_accept")])
+keyboard_events = Array[InputEvent]([SubResource("ev27"), SubResource("ev28"), SubResource("ev22")])
 provisional = true
 
 [sub_resource type="InputEventJoypadButton" id="ev29"]
 device = -1
-button_index = 1
+button_index = 3
 
 [sub_resource type="InputEventKey" id="ev30"]
 device = -1
 physical_keycode = 4194308
+
+[sub_resource type="InputEventKey" id="ev_back"]
+device = -1
+physical_keycode = 87
 
 [sub_resource type="Resource" id="act_ui_cancel"]
 script = ExtResource("2_action")
@@ -256,7 +249,7 @@ context = 1
 display_name_key = "INPUT_ACTION_UI_CANCEL"
 deadzone = 0.2
 gamepad_events = Array[InputEvent]([SubResource("ev29")])
-keyboard_events = Array[InputEvent]([SubResource("ev26"), SubResource("ev30")])
+keyboard_events = Array[InputEvent]([SubResource("ev26"), SubResource("ev30"), SubResource("ev_back")])
 provisional = true
 
 [sub_resource type="InputEventJoypadButton" id="ev31"]

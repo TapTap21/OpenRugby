@@ -3,8 +3,9 @@
 - Slice: S9. Architecture: [ADR-004](../adr/ADR-004-core-architecture.md) section 6, ADR-001.
 - Depends on: S1-core `InputFrame` and `InputSource` (`game/match/`), defined in
   [S1-core](S1-core.md) section 2.2 and 3.1. Do not redefine them.
-- The action list is PROVISIONAL until p1-frontend-lead reports Rugby 08's controls
-  (`Data/controltypes.csv`). Changing it must be a data edit to `default_action_set.tres` only.
+- Action role defaults follow the observed Rugby 08 controls in
+  [the input RE](../re/11-input-camera-hud-save.md). The action list remains a provisional subset
+  of those context-sensitive roles; changing bindings is a data edit to `default_action_set.tres`.
 - Reimplementation, not a port (PLAN section 4 rule 0, CONVENTIONS "Reimplementation, not a
   port"): only Rugby 08's observable behaviour and numeric constants are carried over, always
   into named Resource fields with units. Names, structure, update order and data layouts are
@@ -72,25 +73,27 @@ Gamepad names use Godot's SDL layout (`JOY_BUTTON_*`, `JOY_AXIS_*`).
 
 | id | context | gamepad default | keyboard default | display key |
 |---|---|---|---|---|
-| `move_up` | MATCH | left stick Y negative | W, Up | `INPUT_ACTION_MOVE_UP` |
-| `move_down` | MATCH | left stick Y positive | S, Down | `INPUT_ACTION_MOVE_DOWN` |
-| `move_left` | MATCH | left stick X negative | A, Left | `INPUT_ACTION_MOVE_LEFT` |
-| `move_right` | MATCH | left stick X positive | D, Right | `INPUT_ACTION_MOVE_RIGHT` |
-| `sprint` | MATCH | right trigger (axis positive) | Shift | `INPUT_ACTION_SPRINT` |
-| `pass_left` | MATCH | left shoulder | Q | `INPUT_ACTION_PASS_LEFT` |
-| `pass_right` | MATCH | right shoulder | E | `INPUT_ACTION_PASS_RIGHT` |
-| `kick` | MATCH | Y | K | `INPUT_ACTION_KICK` |
-| `tackle` | MATCH | X | J | `INPUT_ACTION_TACKLE` |
-| `switch_player` | MATCH | A | L | `INPUT_ACTION_SWITCH_PLAYER` |
+| `move_up` | MATCH | left stick Y negative | Up | `INPUT_ACTION_MOVE_UP` |
+| `move_down` | MATCH | left stick Y positive | Down | `INPUT_ACTION_MOVE_DOWN` |
+| `move_left` | MATCH | left stick X negative | Left | `INPUT_ACTION_MOVE_LEFT` |
+| `move_right` | MATCH | left stick X positive | Right | `INPUT_ACTION_MOVE_RIGHT` |
+| `sprint` | MATCH | right trigger (digital, axis positive) | Space | `INPUT_ACTION_SPRINT` |
+| `pass_left` | MATCH | left shoulder | A | `INPUT_ACTION_PASS_LEFT` |
+| `pass_right` | MATCH | right shoulder | D | `INPUT_ACTION_PASS_RIGHT` |
+| `kick` | MATCH | X / Cross | S | `INPUT_ACTION_KICK` |
+| `tackle` | MATCH | X / Cross (shared role by game context) | S | `INPUT_ACTION_TACKLE` |
+| `switch_player` | MATCH | left trigger (digital, axis positive) | Left Shift | `INPUT_ACTION_SWITCH_PLAYER` |
 | `pause` | SYSTEM | Start | Escape | `INPUT_ACTION_PAUSE` |
-| `ui_accept` | UI | A | Enter, Space | `INPUT_ACTION_UI_ACCEPT` |
-| `ui_cancel` | UI | B | Escape, Backspace | `INPUT_ACTION_UI_CANCEL` |
+| `ui_accept` | UI | X / Cross | Enter, Space, S | `INPUT_ACTION_UI_ACCEPT` |
+| `ui_cancel` | UI | Triangle | Escape, Backspace, W | `INPUT_ACTION_UI_CANCEL` |
 | `ui_up` | UI | D-pad up | Up | `INPUT_ACTION_UI_UP` |
 | `ui_down` | UI | D-pad down | Down | `INPUT_ACTION_UI_DOWN` |
 | `ui_left` | UI | D-pad left | Left | `INPUT_ACTION_UI_LEFT` |
 | `ui_right` | UI | D-pad right | Right | `INPUT_ACTION_UI_RIGHT` |
 
-Axes: one, `move` = (`move_left`, `move_right`, `move_up`, `move_down`). Button bits therefore:
+Axes: one, `move` = (`move_left`, `move_right`, `move_up`, `move_down`). Movement actions use a
+0.5 deadzone. Godot's `Input.get_vector` supplies the observed unit-disc clamp, and all non-stick
+roles (including sprint and triggers) are digital held actions; pressure is not sampled. Button bits therefore:
 `sprint` 0, `pass_left` 1, `pass_right` 2, `kick` 3, `tackle` 4, `switch_player` 5;
 `axes_per_slot() == 2`, matching `MatchConfig.axes_per_slot`'s default. Joypad motion defaults use
 `axis_value` of exactly `-1.0` or `1.0`. All actions are remappable (keyboard-only play must stay
@@ -188,13 +191,13 @@ Tests in `tests/unit/platform/input/`. Tests that change `InputMap` or `Input` s
   `same_binding` event with `device == -1`; an `InputEventMouseMotion` encodes to `{}`;
   `decode({"type": "nope"})` is null.
 - I-08 After `apply_defaults()`, `InputMap.has_action` is true for all 17 actions and
-  `get_events(&"kick", GAMEPAD)` holds exactly the default Y button event.
+  `get_events(&"kick", GAMEPAD)` holds exactly the default X / Cross button event.
 - I-09 `rebind(&"kick", KEYBOARD, 0, <key P>)` returns `OK`, `InputMap.action_has_event` is true
-  for key P and false for the old K, and `EventBus.input_bindings_changed` was emitted.
+  for key P and false for the old S, and `EventBus.input_bindings_changed` was emitted.
 - I-10 `rebind` errors: unknown action `ERR_DOES_NOT_EXIST`; non-remappable action (test set)
   `ERR_UNAVAILABLE`; gamepad event for `KEYBOARD` `ERR_INVALID_PARAMETER`; index past the end
   `ERR_INVALID_PARAMETER`.
-- I-11 `find_conflicts(&"kick", <key J>)` returns `[tackle]`;
+- I-11 `find_conflicts(&"kick", <key S>)` returns `[tackle]`;
   `find_conflicts(&"ui_cancel", <key Escape>)` does not contain `pause`;
   `find_conflicts(&"kick", <key Escape>)` contains `pause`.
 - I-12 `reset_action(&"kick")` after a rebind restores exactly the defaults.
@@ -203,7 +206,8 @@ Tests in `tests/unit/platform/input/`. Tests that change `InputMap` or `Input` s
 - I-14 `load_from` returns `ERR_FILE_NOT_FOUND` for a missing file and `ERR_FILE_UNRECOGNIZED` for
   a file with `schema_version = 2`, and in both cases bindings are unchanged.
 - I-15 `load_from` ignores unknown action ids and invalid event entries in the file.
-- I-16 Sampler: with `Input.action_press(&"kick")` and `Input.action_press(&"move_right")`,
+- I-16 Sampler: kick is a digital held role (not analog pressure). With
+  `Input.action_press(&"kick")` and `Input.action_press(&"move_right")`,
   `fill_frame(7, frame)` gives `frame.tick == 7`, bit 3 set, no other bits, axis 0 == 127 and
   axis 1 == 0; after releasing both, a second fill gives all zeros.
 - I-17 Sampler with `move_left` and `move_up` pressed fully gives axes (-90, -90) (`get_vector`

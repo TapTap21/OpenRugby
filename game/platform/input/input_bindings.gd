@@ -31,7 +31,7 @@ func apply_defaults() -> void:
 	for action: InputActionDef in action_set.actions:
 		if action != null:
 			_apply_default(action)
-	EventBus.input_bindings_changed.emit()
+		_emit_bindings_changed()
 
 
 ## Returns the current [InputMap] events of [param action_id] for [param device], in map order.
@@ -83,7 +83,7 @@ func reset_action(action_id: StringName) -> void:
 	if definition == null:
 		return
 	_apply_default(definition)
-	EventBus.input_bindings_changed.emit()
+	_emit_bindings_changed()
 
 
 ## Same as [method apply_defaults].
@@ -126,7 +126,7 @@ func load_from(path: String = DEFAULT_PATH) -> Error:
 			continue
 		_load_device(config, definition.id, Device.GAMEPAD, _SECTION_GAMEPAD)
 		_load_device(config, definition.id, Device.KEYBOARD, _SECTION_KEYBOARD)
-	EventBus.input_bindings_changed.emit()
+	_emit_bindings_changed()
 	return OK
 
 
@@ -141,6 +141,14 @@ func _apply_default(definition: InputActionDef) -> void:
 	for event: InputEvent in definition.keyboard_events:
 		if event != null:
 			InputMap.action_add_event(definition.id, _with_any_device(event))
+
+
+func _emit_bindings_changed() -> void:
+	var emit_result: Error = EventBusAccess.emit(&"input_bindings_changed")
+	if emit_result != OK and emit_result != ERR_UNAVAILABLE:
+		push_warning(
+			"InputBindings: could not emit input_bindings_changed (%s)" % error_string(emit_result)
+		)
 
 
 func _edit(
@@ -168,7 +176,7 @@ func _edit(
 	else:
 		replacement[index] = _with_any_device(event)
 	_replace_device_events(action_id, device, replacement)
-	EventBus.input_bindings_changed.emit()
+	_emit_bindings_changed()
 	return OK
 
 
