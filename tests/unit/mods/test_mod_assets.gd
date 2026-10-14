@@ -10,6 +10,11 @@ const PROBE_PATH: String = "res://tests/fixtures/data/probe.tres"
 const SHADOW_REL_PATH: String = "tests/fixtures/data/kit_extra.tres"
 const ALPHA_SHADOW: String = "res://tests/fixtures/mods/fx-alpha/overrides/" + SHADOW_REL_PATH
 const BETA_SHADOW: String = "res://tests/fixtures/mods/fx-beta/overrides/" + SHADOW_REL_PATH
+const SIDECAR_PATH: String = "res://tests/fixtures/data/sidecar_only.tres"
+const SIDECAR_SHADOW: String = (
+	"res://tests/fixtures/mods/fx-sidecar/overrides/"
+	+ "tests/fixtures/data/sidecar_only.tres.import"
+)
 
 var _runtimes: Array[ModRuntime] = []
 
@@ -91,3 +96,14 @@ func test_m28_overrides_without_assets_capability_ignored() -> void:
 	var r1: GdUnitBoolAssert = assert_bool(_has_issue(runtime, &"capability_missing")).is_true()
 	@warning_ignore("unused_variable")
 	var r2: GdUnitStringAssert = assert_str(runtime.resolve_asset_path(KIT_PATH)).is_equal(KIT_PATH)
+
+
+## An import sidecar by itself maps the logical asset key to the full physical sidecar path.
+func test_sidecar_only_override_preserves_physical_suffix() -> void:
+	var runtime: ModRuntime = _apply(["fx-sidecar"])
+	@warning_ignore("unused_variable")
+	var r1: GdUnitStringAssert = assert_str(runtime.resolve_asset_path(SIDECAR_PATH)).is_equal(
+		SIDECAR_SHADOW
+	)
+	@warning_ignore("unused_variable")
+	var r2: GdUnitBoolAssert = assert_bool(FileAccess.file_exists(SIDECAR_SHADOW)).is_true()

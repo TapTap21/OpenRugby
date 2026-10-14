@@ -27,26 +27,47 @@ func start(
 	config: MatchConfig,
 	source: InputSource,
 	systems: Array[SimSystem] = [],
-	mod_set_hash: String = ""
+	mod_set_hash: String = "",
+	extension_points: ExtensionPoints = null
 ) -> Error:
 	if Engine.physics_ticks_per_second != MatchSim.TICKS_PER_SECOND:
 		return ERR_UNCONFIGURED
-	if not config.validate().is_empty():
+	var effective_config: MatchConfig = config.duplicate(true) as MatchConfig
+	if extension_points != null:
+		var filtered_flow: Variant = extension_points.filter(
+			BaseExtensionPoints.MATCH_FLOW_CONFIG, effective_config.flow, [effective_config]
+		)
+		if not filtered_flow is MatchFlowConfig:
+			return ERR_INVALID_PARAMETER
+		effective_config.flow = filtered_flow
+	if not effective_config.validate().is_empty():
 		return ERR_INVALID_PARAMETER
-	sim = MatchSim.new(config)
+	var provided_systems: Array = []
+	var typed_provided_systems: Array[SimSystem] = []
+	if extension_points != null:
+		provided_systems = extension_points.collect(
+			BaseExtensionPoints.MATCH_SIM_SYSTEMS, [effective_config]
+		)
+	for provided_system: Variant in provided_systems:
+		if not provided_system is SimSystem:
+			return ERR_INVALID_PARAMETER
+		typed_provided_systems.append(provided_system)
+	sim = MatchSim.new(effective_config)
 	for system: SimSystem in systems:
+		sim.add_system(system)
+	for system: SimSystem in typed_provided_systems:
 		sim.add_system(system)
 	var header: ReplayHeader = ReplayHeader.new()
 	var version: String = ProjectSettings.get_setting("application/config/version", "")
 	header.game_version = version
-	header.seed = config.seed
+	header.seed = effective_config.seed
 	header.mod_set_hash = mod_set_hash
 	header.action_layout_hash = source.layout_hash()
-	header.slot_count = config.slot_count
-	header.axes_per_slot = config.axes_per_slot
+	header.slot_count = effective_config.slot_count
+	header.axes_per_slot = effective_config.axes_per_slot
 	input_log = InputLog.new(header)
 	_source = source
-	_frame = InputFrame.new(config.slot_count, config.axes_per_slot)
+	_frame = InputFrame.new(effective_config.slot_count, effective_config.axes_per_slot)
 	var err: int = sim.state_changed.connect(_on_sim_state_changed)
 	assert(err == OK)
 	err = sim.period_started.connect(_on_sim_period_started)

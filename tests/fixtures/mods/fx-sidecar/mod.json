@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "id": "fx-sidecar",
+  "name": "Fixture Sidecar",
+  "version": "1.0.0",
+  "author": "tests",
+  "description": "An import sidecar without its source asset.",
+  "game_version": ">=0.1.0 <0.2.0",
+  "dependencies": [],
+  "load_priority": 0,
+  "capabilities": ["assets"]
+}

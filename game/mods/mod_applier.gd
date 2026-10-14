@@ -53,11 +53,18 @@ static func _map_assets(runtime: ModRuntime, manifest: ModManifest) -> void:
 	for relative: String in _files_under(overrides, ""):
 		if relative.ends_with(".uid"):
 			continue
-		var mapped: String = relative.trim_suffix(".import").trim_suffix(".remap")
+		var mapped: String = _logical_asset_path(relative)
 		if seen.has(mapped):
 			continue
 		seen[mapped] = true
-		runtime.map_asset("res://" + mapped, overrides.path_join(mapped), manifest.id)
+		runtime.map_asset("res://" + mapped, overrides.path_join(relative), manifest.id)
+
+
+static func _logical_asset_path(relative: String) -> String:
+	var logical_path: String = relative
+	while logical_path.ends_with(".import") or logical_path.ends_with(".remap"):
+		logical_path = logical_path.trim_suffix(".import").trim_suffix(".remap")
+	return logical_path
 
 
 ## Returns every file below [param root] as a path relative to it, sorted, recursively.

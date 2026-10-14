@@ -3,6 +3,23 @@ extends GdUnitTestSuite
 ## Tests for MatchRunner: start validation, stepping, input end and EventBus relays
 ## (S1-core section 3.4, criteria C-31 to C-34).
 
+
+class _CounterSystem:
+	extends SimSystem
+
+	var id: StringName = &""
+	var ticks: int = 0
+
+	func _init(p_id: StringName) -> void:
+		id = p_id
+
+	func system_id() -> StringName:
+		return id
+
+	func tick(_sim: MatchSim) -> void:
+		ticks += 1
+
+
 var _bus_callable: Callable = Callable()
 var _bus_pairs: Array[String] = []
 
@@ -117,3 +134,51 @@ func test_c34_event_bus_relays_state_changes() -> void:
 	)
 	@warning_ignore("unused_variable")
 	var r3: GdUnitArrayAssert = assert_array(_bus_pairs).is_equal(sim_pairs)
+
+
+## Main passes its owned runtime to MatchRunner: flow filters apply and provider systems follow
+## explicitly supplied base systems.
+func test_main_starts_match_with_mod_extension_points() -> void:
+	var main: Main = auto_free(Main.new())
+	var runtime: ModRuntime = ModRuntime.new()
+	main._mod_runtime = runtime
+	var hook_system: _CounterSystem = _CounterSystem.new(&"hook_system")
+	var base_system: _CounterSystem = _CounterSystem.new(&"base_system")
+	var filter_result: Error = runtime.extension_points.register(
+		BaseExtensionPoints.MATCH_FLOW_CONFIG,
+		&"test-mod",
+		func(flow: MatchFlowConfig, _config: MatchConfig) -> MatchFlowConfig:
+			flow.initial_state = MatchStateIds.KICK_OFF
+			return flow
+	)
+	var provider_result: Error = runtime.extension_points.register(
+		BaseExtensionPoints.MATCH_SIM_SYSTEMS,
+		&"test-mod",
+		func(_config: MatchConfig) -> SimSystem: return hook_system
+	)
+	@warning_ignore("unused_variable")
+	var r1: GdUnitIntAssert = assert_int(filter_result).is_equal(OK)
+	@warning_ignore("unused_variable")
+	var r2: GdUnitIntAssert = assert_int(provider_result).is_equal(OK)
+	var systems: Array[SimSystem] = [base_system]
+	var start_result: Error = main.start_match(
+		MatchConfig.create_default(), InputSource.new(), systems
+	)
+	@warning_ignore("unused_variable")
+	var r3: GdUnitIntAssert = assert_int(start_result).is_equal(OK)
+	var runner: MatchRunner = main.get_child(0) as MatchRunner
+	@warning_ignore("unused_variable")
+	var r4: GdUnitStringAssert = assert_str(String(runner.sim.current_state())).is_equal("kick_off")
+	@warning_ignore("unused_variable")
+	var stepped: GdUnitBoolAssert = assert_bool(runner.step_once()).is_true()
+	@warning_ignore("unused_variable")
+	var r5: GdUnitIntAssert = assert_int(base_system.ticks).is_equal(1)
+	@warning_ignore("unused_variable")
+	var r6: GdUnitIntAssert = assert_int(hook_system.ticks).is_equal(1)
+	var rows: Array = runner.sim.snapshot()["systems"]
+	var ids: Array[StringName] = []
+	for row: Dictionary in rows:
+		@warning_ignore("return_value_discarded")
+		ids.append(row["id"])
+	@warning_ignore("unused_variable")
+	var r7: GdUnitArrayAssert = assert_array(ids).is_equal([&"base_system", &"hook_system"])

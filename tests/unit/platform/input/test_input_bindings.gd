@@ -92,6 +92,18 @@ func test_i08_apply_defaults_fills_input_map() -> void:
 		)
 
 
+## I-08 regression: applying all defaults emits one change after the full set is installed.
+func test_apply_defaults_emits_once_for_the_complete_action_set() -> void:
+	_bindings = InputBindings.new(_fresh_set())
+	@warning_ignore("unused_variable")
+	var connected: Error = EventBus.input_bindings_changed.connect(_changed_callable)
+	_bindings.apply_defaults()
+	@warning_ignore("unused_variable")
+	var r1: GdUnitArrayAssert = assert_array(_changed_hits).is_equal([1])
+	@warning_ignore("unused_variable")
+	var r2: GdUnitBoolAssert = assert_bool(InputMap.has_action(&"kick")).is_true()
+
+
 ## I-09: rebinding kick to P succeeds, replaces S, and emits input_bindings_changed.
 func test_i09_rebind_replaces_and_emits() -> void:
 	var bindings: InputBindings = _defaults()

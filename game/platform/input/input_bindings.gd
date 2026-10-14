@@ -31,7 +31,7 @@ func apply_defaults() -> void:
 	for action: InputActionDef in action_set.actions:
 		if action != null:
 			_apply_default(action)
-		_emit_bindings_changed()
+	_emit_bindings_changed()
 
 
 ## Returns the current [InputMap] events of [param action_id] for [param device], in map order.
