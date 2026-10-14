@@ -108,7 +108,7 @@ openrugby/
 
 What is committed and what is not, per the Godot version-control docs:
 `.import` sidecar files and `project.godot` are committed; `.godot/` is not.
-Binary assets go through Git LFS via `.gitattributes`. Android keystores,
+Binary assets go through Git LFS via `.gitattributes`. If LFS storage or bandwidth outgrows the Git host's quota, move the LFS backend to Cloudflare R2 through an LFS server/proxy; the `.gitattributes` rules stay the same. Android keystores,
 macOS notarization credentials and Windows signing certs never enter the repo.
 
 ---
