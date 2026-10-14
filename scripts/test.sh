@@ -8,6 +8,9 @@ cd "$(dirname "$0")/.."
 GODOT_BIN="${GODOT_BIN:-godot}"
 TARGET="${1:-res://tests}"
 
+# Never let Godot scan original game files or extracted assets (it follows symlinks).
+scripts/check-godot-safe.sh
+
 # Make sure class_name cache and imports exist (fresh CI checkouts have no .godot/).
 "$GODOT_BIN" --headless --path . --import >/dev/null 2>&1 || true
 

@@ -41,15 +41,17 @@ godot --headless --export-release Linux build/openrugby.x86_64   # export (also 
 
 Optional: `uv tool install pre-commit && pre-commit install` to run the checks on every commit.
 
-Your game files go in `original/` (gitignored). Godot scans every folder under the project,
-following symlinks, and writes `.import` sidecars next to anything it recognises, so do **not**
-symlink `original/` straight at your install. Make it a real folder containing an empty
-`.gdignore` and link the install's contents inside it:
+Your game files are linked into `original/` (gitignored). Godot scans every folder under the
+project, follows symlinks, and writes `.import` sidecars next to anything it recognises, so the
+install must never be visible to it. The setup script makes `original/` a real folder with a
+`.gdignore` and one link per install entry, and also protects `extracted/`:
 
 ```bash
-mkdir original && touch original/.gdignore
-ln -s /path/to/Rugby08/* original/
+scripts/link-original.sh /path/to/Rugby08    # or set OPENRUGBY_GAME_DIR
 ```
+
+`scripts/test.sh` runs `scripts/check-godot-safe.sh` first and refuses to start Godot if either
+folder is exposed. Run the check yourself before opening the project in the editor.
 
 ## Contributing
 
