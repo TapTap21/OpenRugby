@@ -16,6 +16,11 @@ Stages (always run in this order):
 ``models``
     Convert EAGL ELF objects to glTF (``<out>/models``); the player skeleton
     (``!skel.o``) is located by name and applied to skin-less objects.
+``animations``
+    Convert every distinct motion clip (files starting ``01 0B``, deduplicated by
+    sha256) to a glTF animation on the ``!skel.o`` skeleton under
+    ``<out>/animations``, plus ``index.json``. Clips are named by their archive member
+    name; a second distinct clip with the same name gets a ``-<sha8>`` suffix.
 
 Incremental: every stage records a signature (input sha256 values, tool source
 hashes, parameters) in ``<out>/pipeline.json`` and is skipped when the signature is
@@ -40,10 +45,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from . import audio, bigf, eagl, fsh, refpack
+from . import audio, bigf, eagl, fsh, motion, refpack
 
 PIPELINE_VERSION = 1
-STAGES = ("archives", "textures", "audio", "models")
+STAGES = ("archives", "textures", "audio", "models", "animations")
 MAX_NESTED_DEPTH = 8
 GAME_EXE = "Rugby08.exe"
 FFMPEG_ENV = "OPENRUGBY_FFMPEG"
@@ -284,6 +289,14 @@ class Context:
         save_manifest(self.manifest_path, self.manifest)
 
     def archive_shas(self, kinds: tuple[str, ...]) -> list[str]:
+        """Sorted ``key:sha256`` of the selected sources, fingerprinting any not yet hashed.
+
+        Fingerprinting here keeps every stage's signature independent of which stages ran
+        earlier in the same invocation (e.g. ``--stages models`` alone still sees archive changes).
+        """
+        for s in self.sources:
+            if s.kind in kinds and not s.fp:
+                s.fp = fingerprint(s.path, self.stage_doc("archives").get("sources", {}).get(s.key))
         return sorted(
             f"{s.key}:{s.fp.get('sha256')}"
             for s in self.sources
@@ -318,7 +331,7 @@ def archive_roots(out: Path) -> list[Path]:
     for child in sorted(out.iterdir()) if out.is_dir() else []:
         if not child.is_dir():
             continue
-        if child.name in {"audio", "ogg", "ogg-standalone", "textures", "models"}:
+        if child.name in {"audio", "ogg", "ogg-standalone", "textures", "models", "animations"}:
             continue
         roots.append(child)
     return roots
@@ -779,6 +792,117 @@ def stage_models(ctx: Context) -> StageResult:
 
 
 # ---------------------------------------------------------------------------
+# Stage: animations
+# ---------------------------------------------------------------------------
+
+
+def clip_has_root_motion(clip: motion.Clip) -> bool:
+    """True when the root trajectory moves horizontally (x or z) during the clip."""
+    if not clip.frames:
+        return False
+    x0, _, z0 = clip.root_position(0)
+    return any(
+        abs(x - x0) > 1e-6 or abs(z - z0) > 1e-6
+        for x, _, z in (clip.root_position(i) for i in range(len(clip.frames)))
+    )
+
+
+def convert_animation(job: tuple[str, str, str]) -> dict[str, Any]:
+    """Decode one clip and write its glTF animation (in-place pose). Worker-safe."""
+    clip_s, skel_s, gltf_s = job
+    rec: dict[str, Any] = {"gltf": Path(gltf_s).name, "error": None}
+    try:
+        clip = motion.decode_clip(Path(clip_s).read_bytes(), Path(clip_s).name)
+        summary = motion.export_gltf(clip, Path(skel_s), Path(gltf_s))
+        rec.update(
+            frames=summary["frames"],
+            duration_s=round(clip.duration, 6),
+            bones_animated=len(
+                set(clip.header.translation_bones) | set(clip.header.rotation_bones)
+            ),
+            has_root_motion=clip_has_root_motion(clip),
+        )
+    except Exception as exc:  # noqa: BLE001 - one bad clip must not abort the stage
+        rec["error"] = f"{type(exc).__name__}: {exc}"
+        rec["gltf"] = None
+    return rec
+
+
+def stage_animations(ctx: Context) -> StageResult:
+    res = StageResult("animations")
+    roots = archive_roots(ctx.out)
+    if not roots:
+        res.status = "failed"
+        res.failures.append("no extracted archives under the output; run the archives stage first")
+        return res
+    skel = find_skeleton(ctx.out)
+    signature = sha256_text(
+        ctx.archive_shas(("archive",)),
+        sha256_file(skel) if skel else None,
+        module_hash(motion, eagl, bigf, refpack),
+        PIPELINE_VERSION,
+    )
+    out_anim = ctx.out / "animations"
+    if ctx.unchanged("animations", signature, out_anim / "index.json"):
+        res.status = "unchanged"
+        res.counts = ctx.stage_doc("animations").get("counts", {})
+        return res
+
+    # Group every clip file by content hash; the first archive path (sorted) names the clip.
+    by_sha: dict[str, list[str]] = {}
+    files = 0
+    for p in motion.find_clips(roots):
+        files += 1
+        sha = hashlib.sha256(p.read_bytes()).hexdigest()
+        by_sha.setdefault(sha, []).append(p.relative_to(ctx.out).as_posix())
+    distinct = sorted(
+        ((sha, sorted(srcs)) for sha, srcs in by_sha.items()),
+        key=lambda item: (Path(item[1][0]).name.lower(), item[0]),
+    )
+    if distinct and skel is None:
+        res.status = "failed"
+        res.failures.append(
+            f"{SKELETON_NAME} not found: cannot pose {len(distinct)} animation clips"
+        )
+        return res
+    if out_anim.exists():
+        shutil.rmtree(out_anim)
+    out_anim.mkdir(parents=True)
+
+    used: set[str] = set()
+    jobs: list[tuple[str, str, str]] = []
+    meta: list[tuple[str, str, list[str]]] = []  # (sha, clip name, sources)
+    for sha, srcs in distinct:
+        name = Path(srcs[0]).name
+        stem = name
+        if stem.lower() in used:
+            stem = f"{name}-{sha[:8]}"
+        used.add(stem.lower())
+        jobs.append((str(ctx.out / srcs[0]), str(skel), str(out_anim / f"{stem}.gltf")))
+        meta.append((sha, name, srcs))
+    log(f"[animations] {files} clip files, {len(distinct)} distinct clips")
+    results = list(_run_pool(convert_animation, jobs, ctx.workers, "animations", 8))
+
+    entries = []
+    for (sha, name, srcs), rec in zip(meta, results, strict=True):
+        entry = {"name": name, "sources": srcs, "sha256": sha, **rec}
+        entries.append(entry)
+        if rec["error"]:
+            res.failures.append(f"{srcs[0]}: {rec['error']}")
+    (out_anim / "index.json").write_text(
+        json.dumps({"animations": entries}, indent=1, sort_keys=True), encoding="utf-8"
+    )
+    ok = [e for e in entries if not e["error"]]
+    res.counts = {
+        "clips": len(ok),
+        "duplicates": files - len(distinct),
+        "frames": sum(e["frames"] for e in ok),
+    }
+    ctx.record("animations", signature, res)
+    return res
+
+
+# ---------------------------------------------------------------------------
 # Driver
 # ---------------------------------------------------------------------------
 
@@ -787,6 +911,7 @@ STAGE_FUNCS: dict[str, Callable[[Context], StageResult]] = {
     "textures": stage_textures,
     "audio": stage_audio,
     "models": stage_models,
+    "animations": stage_animations,
 }
 
 
