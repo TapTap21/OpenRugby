@@ -5,6 +5,10 @@
   [S1-core](S1-core.md) section 2.2 and 3.1. Do not redefine them.
 - The action list is PROVISIONAL until p1-frontend-lead reports Rugby 08's controls
   (`Data/controltypes.csv`). Changing it must be a data edit to `default_action_set.tres` only.
+- Reimplementation, not a port (PLAN section 4 rule 0, CONVENTIONS "Reimplementation, not a
+  port"): only Rugby 08's observable behaviour and numeric constants are carried over, always
+  into named Resource fields with units. Names, structure, update order and data layouts are
+  ours; when RE findings land they fill data, never reshape these classes after the original.
 - Out of scope: rebinding UI and controller glyphs (S8/S11), local multiplayer device-to-slot
   assignment (v1 samples all devices into slot 0), touch input.
 

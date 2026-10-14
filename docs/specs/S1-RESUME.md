@@ -15,14 +15,14 @@ Temporary handover note for the slice lead. Delete it before the slice is merged
    `localization/translations.csv` (INPUT_ACTION_* and preset keys).
 3. CHANGELOG entry (this checkpoint commit).
 
-## Sub-agents at checkpoint time (none had written files yet)
+## Sub-agents (respawned after the restart; status at respawn)
 
 | Name | Model / effort | Owns | Status |
 |---|---|---|---|
-| `s1-impl-core` | Sonnet 5.5 / medium | `game/match/**`, `game/data/**` | reading specs, implementing S1-core |
-| `s1-impl-modloader` | Opus 5.5 / high | `game/mods/**` | reading specs, implementing S1-modloader |
-| `s9-impl-input` | Haiku 5.5 / medium | `game/platform/input/**`, `autoload/game_settings.gd` | reading specs, implementing S9 |
-| `s1-tests` | Haiku 5.5 / medium | `tests/**` (unit, sim, fixtures) | NOT STARTED: launch hit the session's concurrent sub-agent cap |
+| `s1-impl-core` | Sonnet 5.5 / medium | `game/match/**`, `game/data/**` | had written input_frame, input_source, match_clock, sim_rng, sim_system (uncommitted); resumed |
+| `s1-impl-modloader` | Opus 5.5 / high | `game/mods/**` | no files yet; restarted from scratch |
+| `s9-impl-input` | Haiku 5.5 / medium | `game/platform/input/**`, `autoload/game_settings.gd` | no files yet; restarted from scratch |
+| `s1-tests` | Haiku 5.5 / medium | `tests/**` (unit, sim, fixtures) | no files yet; started |
 
 Implementers do not commit; the lead commits. All Godot runs are wrapped in
 `flock /tmp/openrugby-s1-godot.lock ...` because agents share one project dir.

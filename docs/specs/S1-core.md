@@ -2,6 +2,10 @@
 
 - Slice: S1 (core). Architecture: [ADR-004](../adr/ADR-004-core-architecture.md), ADR-001.
 - Depends on: nothing game-specific. Phase 1 RE later fills data, never code.
+- Reimplementation, not a port (PLAN section 4 rule 0, CONVENTIONS "Reimplementation, not a
+  port"): only Rugby 08's observable behaviour and numeric constants are carried over, always
+  into named Resource fields with units. Names, structure, update order and data layouts are
+  ours; when RE findings land they fill data, never reshape these classes after the original.
 - Out of scope: ball, players on the pitch, rules/laws, AI, rendering, mod loading
   ([S1-modloader](S1-modloader.md)), device input ([S9-input](S9-input.md)).
 

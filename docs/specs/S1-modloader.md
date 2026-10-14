@@ -2,6 +2,10 @@
 
 - Slice: S1 (mod loader core). Architecture: [ADR-003](../adr/ADR-003-mod-loader.md),
   [ADR-004](../adr/ADR-004-core-architecture.md) section 5, PLAN section 1d.
+- Reimplementation, not a port (PLAN section 4 rule 0, CONVENTIONS "Reimplementation, not a
+  port"): only Rugby 08's observable behaviour and numeric constants are carried over, always
+  into named Resource fields with units. Names, structure, update order and data layouts are
+  ours; when RE findings land they fill data, never reshape these classes after the original.
 - Out of scope (S11): mod manager UI, profiles UI, `tools/modcheck.py`, modding docs, the
   first-party Modern pack. S1 delivers the runtime those build on.
 
