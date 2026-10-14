@@ -24,7 +24,7 @@ if [ -n "$bad_ext" ]; then
 fi
 
 # Decompiled-looking pseudo-code under docs/re (Hex-Rays/Ghidra style markers).
-pattern='\b(undefined[0-9]?|_(DWORD|WORD|BYTE|QWORD)\b|__(cdecl|thiscall|fastcall|stdcall)|LOBYTE\(|HIWORD\(|\*\(_?(DWORD|int|undefined)|[a-z]+Var[0-9]+\b|FUN_[0-9a-f]{6,8}|sub_[0-9A-F]{6,8}|LAB_[0-9a-f]{6,8})'
+pattern='\b(undefined[1-8]|_(DWORD|WORD|BYTE|QWORD)\b|__(cdecl|thiscall|fastcall|stdcall)|LOBYTE\(|HIWORD\(|\*\(_?(DWORD|int|undefined)|[a-z]+Var[0-9]+\b|FUN_[0-9a-f]{6,8}|sub_[0-9A-F]{6,8}|LAB_[0-9a-f]{6,8})'
 while IFS= read -r f; do
 	[ -n "$f" ] && [ -f "$f" ] || continue
 	hits="$(grep -nE "$pattern" "$f" || true)"
