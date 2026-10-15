@@ -263,6 +263,10 @@ func _apply_player_input(input: S2PlayerTickInput) -> bool:
 		var updated: PlayerMotionState = player.duplicate_state()
 		updated.sprint_request = input.sprint_request
 		updated.urgency = input.urgency
+		if input.move_x_q != 0 or input.move_z_q != 0:
+			updated.desired_heading_turns = wrapf(
+				atan2(float(input.move_x_q), float(input.move_z_q)) / TAU, -0.5, 0.5
+			)
 		updated.fatigue_snapshot = _copy_fatigue(input.fatigue_snapshot)
 		players[index] = updated
 		_updated_player_ids[input.player_id] = true

@@ -609,18 +609,29 @@ static func _restore_player_input(data: Variant) -> S2PlayerTickInput:
 	if fatigue == null:
 		return null
 	var result: S2PlayerTickInput = S2PlayerTickInput.new()
+	var has_move_x: bool = input_data.has("move_x_q")
+	var has_move_z: bool = input_data.has("move_z_q")
+	var legacy_shape: bool = input_data.size() == 4 and not has_move_x and not has_move_z
+	var direction_shape: bool = input_data.size() == 6 and has_move_x and has_move_z
+	if not legacy_shape and not direction_shape:
+		return null
 	if (
-		input_data.size() != 4
-		or not input_data.has("player_id")
+		not input_data.has("player_id")
 		or typeof(input_data["player_id"]) != TYPE_STRING_NAME
 		or typeof(input_data.get("sprint_request")) != TYPE_INT
 		or typeof(input_data.get("urgency")) != TYPE_FLOAT
+		or (has_move_x and typeof(input_data.get("move_x_q")) != TYPE_INT)
+		or (has_move_z and typeof(input_data.get("move_z_q")) != TYPE_INT)
 		or typeof(input_data.get("fatigue")) != TYPE_DICTIONARY
 	):
 		return null
 	result.player_id = input_data["player_id"]
 	result.sprint_request = input_data["sprint_request"]
 	result.urgency = input_data["urgency"]
+	if has_move_x:
+		result.move_x_q = input_data["move_x_q"]
+	if has_move_z:
+		result.move_z_q = input_data["move_z_q"]
 	result.fatigue_snapshot = fatigue
 	return result
 

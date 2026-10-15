@@ -5,6 +5,8 @@ extends RefCounted
 var player_id: StringName = &""
 var sprint_request: int = -1
 var urgency: float = NAN
+var move_x_q: int = 0
+var move_z_q: int = 0
 var fatigue_snapshot: PlayerFatigueSnapshot
 
 
@@ -17,6 +19,10 @@ func is_valid() -> bool:
 		and is_finite(urgency)
 		and urgency >= 0.0
 		and urgency <= 1.0
+		and move_x_q >= -127
+		and move_x_q <= 127
+		and move_z_q >= -127
+		and move_z_q <= 127
 		and fatigue_snapshot != null
 		and fatigue_snapshot.is_valid()
 		and fatigue_snapshot.player_id == player_id
@@ -29,5 +35,7 @@ func snapshot() -> Dictionary:
 		"player_id": player_id,
 		"sprint_request": sprint_request,
 		"urgency": urgency,
+		"move_x_q": move_x_q,
+		"move_z_q": move_z_q,
 		"fatigue": fatigue_snapshot.snapshot() if fatigue_snapshot != null else {},
 	}

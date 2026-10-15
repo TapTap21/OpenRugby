@@ -115,6 +115,35 @@ func results_since(first_index: int) -> Array[Dictionary]:
 	return values
 
 
+## Detached read-only motion snapshots in stable team/shirt/player-id order.
+func player_state_snapshots() -> Array[Dictionary]:
+	var values: Array[Dictionary] = []
+	if _locomotion_system == null:
+		return values
+	var ordered_players: Array[PlayerMotionState] = _locomotion_system.players.duplicate()
+	ordered_players.sort_custom(_motion_state_less)
+	for player: PlayerMotionState in ordered_players:
+		var frozen: Variant = _freeze_snapshot(player.snapshot())
+		if frozen is Dictionary:
+			values.append(frozen)
+	values.make_read_only()
+	return values
+
+
+## Detached read-only authoritative ball snapshot; empty until the ball system is bound.
+func ball_state_snapshot() -> Dictionary:
+	if _ball_system == null or _ball_system.state == null:
+		var empty_snapshot: Dictionary = {}
+		empty_snapshot.make_read_only()
+		return empty_snapshot
+	var frozen: Variant = _freeze_snapshot(_ball_system.state.snapshot())
+	if frozen is Dictionary:
+		return frozen
+	var empty_result: Dictionary = {}
+	empty_result.make_read_only()
+	return empty_result
+
+
 ## Returns current queued commands with sequence values for an input-log frame.
 func queued_command_snapshots() -> Array[Dictionary]:
 	var values: Array[Dictionary] = []
@@ -402,6 +431,32 @@ func _player_initialization_less(
 	if left.player.shirt_number != right.player.shirt_number:
 		return left.player.shirt_number < right.player.shirt_number
 	return String(left.player.player_id) < String(right.player.player_id)
+
+
+func _motion_state_less(left: PlayerMotionState, right: PlayerMotionState) -> bool:
+	if left.team_id != right.team_id:
+		return String(left.team_id) < String(right.team_id)
+	if left.shirt_number != right.shirt_number:
+		return left.shirt_number < right.shirt_number
+	return String(left.player_id) < String(right.player_id)
+
+
+func _freeze_snapshot(value: Variant) -> Variant:
+	if value is Dictionary:
+		var dictionary_value: Dictionary = value
+		var frozen_dictionary: Dictionary = dictionary_value.duplicate()
+		for key: Variant in frozen_dictionary.keys():
+			frozen_dictionary[key] = _freeze_snapshot(frozen_dictionary[key])
+		frozen_dictionary.make_read_only()
+		return frozen_dictionary
+	if value is Array:
+		var array_value: Array = value
+		var frozen_array: Array = []
+		for item: Variant in array_value:
+			frozen_array.append(_freeze_snapshot(item))
+		frozen_array.make_read_only()
+		return frozen_array
+	return value
 
 
 func _provider_setup(provider: Object) -> Dictionary:

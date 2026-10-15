@@ -126,6 +126,19 @@ for an unresolved path merely because the required fields are populated.
   player/match layer keyed by team and shirt, and fatigue-adjusted skill values for applicable
   pass/tackle queries. Persistent profile attributes and the injected fatigue snapshot remain
   read-only to S2.
+- `S2PlayerTickInput` carries signed quantized pitch-plane direction components in `[-127,127]`
+  for +X and +Z. The owner supplies those components after resolving controller/camera/team
+  orientation; S2 does not sample buttons or infer a team-relative attack direction. A nonzero
+  direction resolves a desired heading with +Z as zero turns and +X as +0.25 turns, consistent
+  with RE 12 §2.4's root-heading convention. This rebuild provisionally preserves the prior desired
+  heading for zero direction; RE does not establish neutral-direction behavior. RE 06 §2.9's PID
+  gains are unresolved, and the current runtime has no turn-policy
+  injection seam, so current heading does not advance yet. RE 12 §2.4 leaves root-motion
+  composition with actor heading unresolved; S2 must not advance world position from speed and
+  heading alone. Until that displacement contract is resolved, `position_m` remains
+  owner-initialized state. `S2RuntimePort.player_state_snapshots()` and
+  `S2RuntimePort.ball_state_snapshot()` expose deeply read-only primitive snapshots in deterministic
+  order for scene presentation; they never expose mutable sim objects.
 - `ContactResult`, `KickLaunch`, `PassLaunch`, `CatchResult`, `PickupResult`, and `TackleResult`
   are typed result values with stable fields; use enums for outcomes, never stringly typed tags.
 - Mutable state and any state affecting future behavior or randomness must be represented in the
@@ -146,9 +159,13 @@ One S1 match tick is exactly 1/60 s. Its registration order and S2 internal phas
 
 1. **Input/state capture:** read current `InputFrame`, player/team state, pitch condition and
    current ball mode. Do not sample devices here.
-2. **Player movement and energy:** capture the read-only fatigue-time snapshot and fatigue-adjusted
-   skill inputs supplied by the player/match layer. Derive run/sprint mode and desired speed/heading,
-   update speed and S2's sprint-energy pool with `dt = 1/60`, using the injected fatigue-derived
+2. **Player movement and energy:** capture the read-only fatigue-time snapshot, pitch-plane
+   direction intent and fatigue-adjusted skill inputs supplied by the player/match layer. Derive
+   run/sprint mode and desired speed; resolve desired heading from nonzero quantized intent. Current
+   heading advancement awaits a turn-policy seam for explicitly injected provisional PID gains,
+   and position advancement awaits an actor-displacement provider; neither may be guessed from
+   speed or renderer motion. Update
+   speed and S2's sprint-energy pool with `dt = 1/60`, using the injected fatigue-derived
    energy cap. Do not advance fatigue here: the owner advances each on-pitch player's team/shirt
    value by `dt_match` and applies its half-time recovery per RE 09 §2.3. Use RE 06 §2.9 for
    locomotion and sprint-energy behavior. The original movement equations' 50 Hz constants are
