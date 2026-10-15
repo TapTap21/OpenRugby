@@ -26,7 +26,7 @@ func is_valid() -> bool:
 		and energy_cap >= 40.0
 		and energy_cap <= 100.0
 		and initial_sprint_energy >= -1.0
-		and initial_sprint_energy <= energy_cap
+		and initial_sprint_energy <= 100.0
 		and energy_percent >= 0
 		and energy_percent <= 100
 		and effective_passing >= 0

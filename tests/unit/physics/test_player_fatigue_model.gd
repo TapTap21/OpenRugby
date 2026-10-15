@@ -14,9 +14,12 @@ func _add(
 	shirt: int,
 	stamina: int,
 	fatigue: float,
-	pitch: bool
+	pitch: bool,
+	initial_sprint_energy: float = -1.0
 ) -> bool:
-	return model.add_player(team, player, shirt, stamina, 94, 94, fatigue, pitch, -1.0)
+	return model.add_player(
+		team, player, shirt, stamina, 94, 94, fatigue, pitch, initial_sprint_energy
+	)
 
 
 ## The observed full-time curve and percent conversion preserve the exact truncate boundary.
@@ -89,6 +92,32 @@ func test_f03_low_stats_keep_raw_tackling_and_clamped_passing() -> void:
 		var r5: GdUnitIntAssert = assert_int(fatigue.effective_tackling).is_equal(-45)
 		@warning_ignore("unused_variable")
 		var r6: GdUnitBoolAssert = assert_bool(fatigue.is_valid()).is_true()
+
+
+## Initial sprint energy remains valid as the current fatigue cap falls.
+func test_f03_initial_energy_is_not_revalidated_against_later_cap() -> void:
+	var model: PlayerFatigueModel = _model()
+	@warning_ignore("unused_variable")
+	var r1: GdUnitBoolAssert = (
+		assert_bool(_add(model, &"home", &"starter", 1, 100, 0.0, true, 100.0)).is_true()
+	)
+	var initial: PlayerFatigueSnapshot = model.fatigue_snapshot(&"home", 1)
+	@warning_ignore("unused_variable")
+	var r2: GdUnitBoolAssert = assert_bool(initial.is_valid()).is_true()
+	@warning_ignore("unused_variable")
+	var r3: GdUnitFloatAssert = assert_float(initial.energy_cap).is_equal(100.0)
+	@warning_ignore("unused_variable")
+	var r4: GdUnitBoolAssert = assert_bool(model.advance_frame(4800.0)).is_true()
+	var fatigued: PlayerFatigueSnapshot = model.fatigue_snapshot(&"home", 1)
+	@warning_ignore("unused_variable")
+	var r5: GdUnitBoolAssert = assert_bool(fatigued != null).is_true()
+	if fatigued != null:
+		@warning_ignore("unused_variable")
+		var r6: GdUnitBoolAssert = assert_bool(fatigued.is_valid()).is_true()
+		@warning_ignore("unused_variable")
+		var r7: GdUnitFloatAssert = assert_float(fatigued.energy_cap).is_equal(90.0)
+		@warning_ignore("unused_variable")
+		var r8: GdUnitFloatAssert = assert_float(fatigued.initial_sprint_energy).is_equal(100.0)
 
 
 ## The owner accrues only the caller-designated on-pitch player and rejects invalid deltas.

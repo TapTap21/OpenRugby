@@ -40,6 +40,7 @@ func add_player(
 		or initial_sprint_energy < -1.0
 		or params == null
 		or not params.validate().is_empty()
+		or initial_sprint_energy > 100.0
 		or _entries.has(_key(team_id, shirt_number))
 	):
 		return false
@@ -229,6 +230,7 @@ func _restore_entry(value: Dictionary) -> PlayerFatigueEntry:
 		or entry.fatigue_time_s < 0.0
 		or not is_finite(entry.initial_sprint_energy)
 		or entry.initial_sprint_energy < -1.0
+		or entry.initial_sprint_energy > 100.0
 	):
 		return null
 	return entry

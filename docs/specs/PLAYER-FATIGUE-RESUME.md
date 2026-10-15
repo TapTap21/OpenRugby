@@ -8,8 +8,11 @@ curve, integer energy percent, and fatigue penalties.
 `PlayerFatigueModel` is a deterministic owner independent of presentation. Callers
 must inject `dt_match`, on-pitch status, player attributes, initial fatigue time,
 and initial sprint energy. This slice does not derive the match clock scale or
-sprint-energy initialization. `fatigue_snapshot()` produces the typed pre-advance
-`PlayerFatigueSnapshot` consumed by S2. Passing uses S2's required `max(0, base -
+sprint-energy initialization. Initial sprint energy remains match-start data in
+[-1, 100] and is not revalidated against later fatigue caps; S2 limits its live
+sprint pool to the current cap as it advances. `fatigue_snapshot()` produces the
+typed pre-advance `PlayerFatigueSnapshot` consumed by S2. Passing uses S2's
+required `max(0, base -
 fatigue_penalty)` rule; Tackling preserves RE09's raw subtraction, which can reach
 −45 for a zero Tackling stat at the 9 percent floor. Replay state is versioned and ordered by
 team then shirt; callers can checkpoint with `snapshot()` and restore atomically.
