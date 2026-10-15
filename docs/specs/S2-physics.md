@@ -231,6 +231,35 @@ floating accumulation and platform-dependent threshold comparisons:
   recover its activation conditions. Do not activate this in Classic. Leave an explicit typed,
   deterministic extension point only if needed; do not invent a trigger or alter Classic cadence.
 
+### Contact LCP response contract
+
+RE 06 §2.4 observes a Dantzig/Baraff-style LCP with normal, friction, and rolling/twist rows per
+contact. Only the following response semantics are recovered well enough to implement as Classic
+behavior:
+
+- For contact long-axis component `c`, compute `k = clamp(f1 + (1 - c*c) * (f0 - f1), 1, 2)`;
+  use `e = k - 1` for normal restitution. The `±f2/2` term is compiled out and must not consume
+  randomness or perturb `k`.
+- Tangential impulse obeys the Coulomb cone `abs(lambda_t) <= f3 * lambda_n`.
+- Solver contacts and rows follow the stable order in §3 and §5. Repeated solves with identical
+  inputs must be deterministic. An oscillating solve aborts the constraint and then the solver;
+  these observed abort outcomes do not recover pivot ordering, convergence policy, oscillation
+  detector, iteration cap, or numeric tolerance.
+- The rolling/twist bound `abs(lambda_r) <= 10*f4` is observed, but the exact row/torque form is
+  unresolved. It cannot be approximated by angular-velocity damping and still be called the
+  recovered Classic solver.
+
+Therefore `BallContactSolver` stays unavailable until a complete injected implementation can
+provide the recovered response plus a documented deterministic policy for unresolved LCP
+mechanics. Do not add guessed matrix coefficients, pivot/iteration limits, tolerances, or rolling
+torque. A failed solve must remain transactional and leave the ball and future-affecting solver
+state unchanged, as required by the `BallContactSolver` API.
+
+Acceptance coverage currently locks the exact surface-to-restitution formula, side-on/end-on
+endpoints, interpolation, and ignored compiled-out randomness. Friction-cone, row-order,
+oscillation-abort, rollback, and cross-platform solve tests belong with the first complete solver;
+they must exercise that implementation rather than a test-only imitation.
+
 ## 5. Mod data and hooks
 
 All observed numeric fields above are data overrides with base Classic values. Unresolved fields
