@@ -21,7 +21,8 @@ var _blockers: Dictionary[Capability, PackedStringArray] = {}
 func add_blocker(capability: Capability, detail: String) -> void:
 	if not _blockers.has(capability):
 		_blockers[capability] = PackedStringArray()
-	_blockers[capability].append(detail)
+	if not _blockers[capability].push_back(detail):
+		return
 
 
 ## True when every required capability is available.
@@ -40,7 +41,10 @@ func unavailable_capabilities() -> Array[Capability]:
 
 ## Returns a copy of the reasons for one capability.
 func details_for(capability: Capability) -> PackedStringArray:
-	return _blockers.get(capability, PackedStringArray()).duplicate()
+	if not _blockers.has(capability):
+		return PackedStringArray()
+	var details: PackedStringArray = _blockers[capability]
+	return details.duplicate()
 
 
 ## Returns stable, user-facing readiness text.
@@ -48,7 +52,8 @@ func describe() -> PackedStringArray:
 	var lines: PackedStringArray = []
 	for capability: Capability in unavailable_capabilities():
 		for detail: String in _blockers[capability]:
-			lines.append("%s: %s" % [_capability_label(capability), detail])
+			if not lines.push_back("%s: %s" % [_capability_label(capability), detail]):
+				return lines
 	return lines
 
 

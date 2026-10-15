@@ -11,9 +11,11 @@ func validate() -> PackedStringArray:
 	if player == null:
 		return PackedStringArray(["player motion state is missing"])
 	if player.player_id == &"" or player.team_id == &"" or player.shirt_number < 0:
-		errors.append("player identity must include team, shirt and stable id")
+		if not errors.push_back("player identity must include team, shirt and stable id"):
+			return errors
 	if not player.initialized or player.sprint_request < 0 or player.sprint_request > 1:
-		errors.append("player motion and initial sprint request are unresolved")
+		if not errors.push_back("player motion and initial sprint request are unresolved"):
+			return errors
 	if (
 		player.on_pitch
 		and (
@@ -24,7 +26,8 @@ func validate() -> PackedStringArray:
 			or player.fatigue_snapshot.shirt_number != player.shirt_number
 		)
 	):
-		errors.append("player requires a matching valid pre-advance fatigue snapshot")
+		if not errors.push_back("player requires a matching valid pre-advance fatigue snapshot"):
+			return errors
 	if (
 		not player.position_m.is_finite()
 		or not is_finite(player.heading_turns)
@@ -53,9 +56,10 @@ func validate() -> PackedStringArray:
 			)
 		)
 	):
-		errors.append(
+		if not errors.push_back(
 			"player initial motion values and locomotion inputs must be finite and bounded"
-		)
+		):
+			return errors
 	return errors
 
 

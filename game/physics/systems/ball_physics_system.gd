@@ -211,7 +211,23 @@ func restore_transaction_checkpoint(checkpoint: SimDependencyCheckpoint) -> bool
 	if checkpoint == null or not checkpoint.complete:
 		return false
 	var saved: Dictionary = checkpoint.state
-	state = _copy_ball_state(saved["ball"])
+	var ball_value: Variant = saved.get("ball")
+	if not ball_value is BallState:
+		return false
+	var restored_ball: BallState = ball_value
+	var mod_issues_value: Variant = saved.get("mod_issues")
+	if not mod_issues_value is PackedStringArray:
+		return false
+	var restored_mod_issues: PackedStringArray = mod_issues_value
+	var source_checkpoint_value: Variant = saved.get("contact_source")
+	if not source_checkpoint_value is SimDependencyCheckpoint:
+		return false
+	var source_checkpoint: SimDependencyCheckpoint = source_checkpoint_value
+	var solver_checkpoint_value: Variant = saved.get("contact_solver")
+	if not solver_checkpoint_value is SimDependencyCheckpoint:
+		return false
+	var solver_checkpoint: SimDependencyCheckpoint = solver_checkpoint_value
+	state = _copy_ball_state(restored_ball)
 	pending_contacts.clear()
 	for contact: BallContact in saved["pending_contacts"]:
 		pending_contacts.append(_copy_contact(contact))
@@ -221,13 +237,9 @@ func restore_transaction_checkpoint(checkpoint: SimDependencyCheckpoint) -> bool
 	wind_policy_resolved = saved["wind_policy_resolved"]
 	wind_enabled = saved["wind_enabled"]
 	wind_km_h = saved["wind_km_h"]
-	mod_issues = saved["mod_issues"].duplicate()
-	var source_restored: bool = contact_source.restore_transaction_checkpoint(
-		saved["contact_source"]
-	)
-	var solver_restored: bool = contact_solver.restore_transaction_checkpoint(
-		saved["contact_solver"]
-	)
+	mod_issues = restored_mod_issues.duplicate()
+	var source_restored: bool = contact_source.restore_transaction_checkpoint(source_checkpoint)
+	var solver_restored: bool = contact_solver.restore_transaction_checkpoint(solver_checkpoint)
 	return source_restored and solver_restored
 
 
@@ -856,15 +868,6 @@ func _copy_contact(source: BallContact) -> BallContact:
 	copy.penetration_m = source.penetration_m
 	copy.source_subfeature_id = source.source_subfeature_id
 	copy.detection_ordinal = source.detection_ordinal
-	return copy
-
-
-func _copy_pass_launch(source: PassLaunch) -> PassLaunch:
-	var copy: PassLaunch = PassLaunch.new()
-	copy.velocity_m_s = source.velocity_m_s
-	copy.target_m = source.target_m
-	copy.flight_time_s = source.flight_time_s
-	copy.unresolved = source.unresolved
 	return copy
 
 

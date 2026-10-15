@@ -233,19 +233,94 @@ func commit_tick() -> void:
 
 
 ## Restores pending commands and outputs after MatchSim restores system/provider state.
-func rollback_tick() -> void:
+func rollback_tick() -> bool:
 	if _transaction_checkpoint == null:
 		_in_tick = false
-		return
-	var state: Dictionary = _transaction_checkpoint.state
+		return false
+	var restored: Dictionary = _validated_runtime_checkpoint(_transaction_checkpoint.state)
+	if restored.is_empty():
+		_reject_checkpoint("runtime checkpoint is malformed")
+		return false
+	var command_values: Variant = restored.get("commands")
+	var output_values: Variant = restored.get("outputs")
+	var valid: bool = command_values is Array and output_values is Array
+	var restored_commands: Array[S2RuntimeCommand] = []
+	var restored_outputs: Array[Dictionary] = []
+	if valid:
+		var command_array: Array = command_values
+		for command_value: Variant in command_array:
+			if not command_value is S2RuntimeCommand:
+				valid = false
+				break
+			var command: S2RuntimeCommand = command_value
+			restored_commands.append(command)
+	if valid:
+		var output_array: Array = output_values
+		for output_value: Variant in output_array:
+			if not output_value is Dictionary:
+				valid = false
+				break
+			var output: Dictionary = output_value
+			restored_outputs.append(output)
+	if not valid:
+		_reject_checkpoint("runtime checkpoint contains invalid typed values")
+		return false
 	_pending_commands.clear()
-	for raw_command: Dictionary in state["commands"]:
-		var command: S2RuntimeCommand = S2RuntimeCommand.from_snapshot(raw_command)
-		if command != null:
-			_pending_commands.append(command)
-	_restore_outputs(state["outputs"])
-	_next_sequence = state["next_sequence"]
+	_pending_commands.append_array(restored_commands)
+	_restore_outputs(restored_outputs)
+	_next_sequence = restored["next_sequence"]
 	_consumed.clear()
+	_in_tick = false
+	_transaction_checkpoint = null
+	return true
+
+
+func _validated_runtime_checkpoint(state: Dictionary) -> Dictionary:
+	var raw_commands: Variant = state.get("commands")
+	var raw_outputs: Variant = state.get("outputs")
+	var raw_next_sequence: Variant = state.get("next_sequence")
+	var valid: bool = (
+		raw_commands is Array
+		and raw_outputs is Array
+		and raw_next_sequence is int
+		and raw_next_sequence >= 0
+	)
+	var restored_commands: Array[S2RuntimeCommand] = []
+	var restored_outputs: Array[Dictionary] = []
+	if valid:
+		var commands: Array = raw_commands
+		for raw_command: Variant in commands:
+			if not raw_command is Dictionary:
+				valid = false
+				break
+			var command_data: Dictionary = raw_command
+			var command: S2RuntimeCommand = S2RuntimeCommand.from_snapshot(command_data)
+			if command == null or not command.validate().is_empty():
+				valid = false
+				break
+			restored_commands.append(command)
+	if valid:
+		var outputs: Array = raw_outputs
+		for raw_output: Variant in outputs:
+			if not raw_output is Dictionary:
+				valid = false
+				break
+			var output_data: Dictionary = raw_output
+			if S2RuntimeResult.from_snapshot(output_data) == null:
+				valid = false
+				break
+			restored_outputs.append(output_data)
+	if not valid:
+		return {}
+	return {
+		"commands": restored_commands,
+		"outputs": restored_outputs,
+		"next_sequence": raw_next_sequence,
+	}
+
+
+func _reject_checkpoint(detail: String) -> void:
+	fail_tick(detail)
 	_in_tick = false
 	_transaction_checkpoint = null
 
@@ -332,10 +407,14 @@ func _player_initialization_less(
 func _provider_setup(provider: Object) -> Dictionary:
 	if provider == null:
 		return {}
-	var script: Script = provider.get_script() as Script
+	var script_value: Variant = provider.get_script()
+	var script_path: String = ""
+	if script_value is Script:
+		var script: Script = script_value
+		script_path = script.resource_path
 	return {
 		"class": provider.get_class(),
-		"script_path": script.resource_path if script != null else "",
+		"script_path": script_path,
 		"snapshot": {},
 	}
 

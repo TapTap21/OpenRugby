@@ -69,8 +69,7 @@ func resolve_catch(
 		)
 		if filtered == null:
 			result.outcome = CatchResult.Outcome.UNRESOLVED
-		else:
-			@warning_ignore("unsafe_cast")
+		elif filtered is CatchResult:
 			var filtered_catch: CatchResult = filtered
 			result.probability = filtered_catch.probability
 			result.outcome = (
@@ -79,6 +78,8 @@ func resolve_catch(
 				else CatchResult.Outcome.CAUGHT
 			)
 			result.resolved = true
+		else:
+			result.outcome = CatchResult.Outcome.UNRESOLVED
 	else:
 		result.outcome = CatchResult.Outcome.CAUGHT
 		result.resolved = true
@@ -95,11 +96,10 @@ func resolve_fumble(probability: float, rng: SimRng) -> CatchResult:
 		last_fumble = result
 		return result
 	var filtered: Variant = _filter_probability(BaseExtensionPoints.PHYSICS_FUMBLE_RESOLVE, result)
-	if filtered == null or rng == null:
+	if filtered == null or rng == null or not filtered is CatchResult:
 		unresolved_inputs += PackedStringArray(["fumble probability or RNG is unresolved"])
 		last_fumble = result
 		return result
-	@warning_ignore("unsafe_cast")
 	var filtered_fumble: CatchResult = filtered
 	result.probability = filtered_fumble.probability
 	result.outcome = (
@@ -160,10 +160,9 @@ func resolve_spill(probability: float, rng: SimRng) -> TackleResult:
 		last_spill = result
 		return result
 	var filtered: Variant = _filter_probability(BaseExtensionPoints.PHYSICS_BALL_SPILL, result)
-	if filtered == null:
+	if filtered == null or not filtered is TackleResult:
 		result.unresolved = true
 	else:
-		@warning_ignore("unsafe_cast")
 		var filtered_spill: TackleResult = filtered
 		result.spill_probability = filtered_spill.spill_probability
 		result.spill_velocity_min = filtered_spill.spill_velocity_min
@@ -208,12 +207,33 @@ func restore_transaction_checkpoint(checkpoint: SimDependencyCheckpoint) -> bool
 	if checkpoint == null or not checkpoint.complete:
 		return false
 	var saved: Dictionary = checkpoint.state
-	last_catch = saved["last_catch"]
-	last_fumble = saved["last_fumble"]
-	last_pickup = saved["last_pickup"]
-	last_tackle = saved["last_tackle"]
-	last_spill = saved["last_spill"]
-	unresolved_inputs = saved["unresolved_inputs"].duplicate()
+	var saved_catch: Variant = saved.get("last_catch")
+	var saved_fumble: Variant = saved.get("last_fumble")
+	var saved_pickup: Variant = saved.get("last_pickup")
+	var saved_tackle: Variant = saved.get("last_tackle")
+	var saved_spill: Variant = saved.get("last_spill")
+	var saved_inputs: Variant = saved.get("unresolved_inputs")
+	if (
+		not saved_catch is CatchResult
+		or not saved_fumble is CatchResult
+		or not saved_pickup is PickupResult
+		or not saved_tackle is TackleResult
+		or not saved_spill is TackleResult
+		or not saved_inputs is PackedStringArray
+	):
+		return false
+	var typed_catch: CatchResult = saved_catch
+	var typed_fumble: CatchResult = saved_fumble
+	var typed_pickup: PickupResult = saved_pickup
+	var typed_tackle: TackleResult = saved_tackle
+	var typed_spill: TackleResult = saved_spill
+	var typed_inputs: PackedStringArray = saved_inputs
+	last_catch = typed_catch
+	last_fumble = typed_fumble
+	last_pickup = typed_pickup
+	last_tackle = typed_tackle
+	last_spill = typed_spill
+	unresolved_inputs = typed_inputs.duplicate()
 	return true
 
 
@@ -223,11 +243,9 @@ func _filter_probability(point: StringName, result: RefCounted) -> Variant:
 	var filtered: Variant = extension_points.filter(point, _copy_result(result))
 	var probability: float
 	if filtered is CatchResult:
-		@warning_ignore("unsafe_cast")
 		var catch_result: CatchResult = filtered
 		probability = catch_result.probability
 	elif filtered is TackleResult:
-		@warning_ignore("unsafe_cast")
 		var tackle_result: TackleResult = filtered
 		if point == BaseExtensionPoints.PHYSICS_TACKLE_RESOLVE:
 			probability = tackle_result.break_probability
@@ -361,14 +379,14 @@ func _gate_from_command(value: S2RuntimeCommand.GateState) -> GateState:
 
 func _copy_result(source: RefCounted) -> RefCounted:
 	if source is CatchResult:
-		@warning_ignore("unsafe_cast")
 		var source_catch: CatchResult = source
 		var catch_copy: CatchResult = CatchResult.new()
 		catch_copy.outcome = source_catch.outcome
 		catch_copy.probability = source_catch.probability
 		catch_copy.resolved = source_catch.resolved
 		return catch_copy
-	@warning_ignore("unsafe_cast")
+	if not source is TackleResult:
+		return RefCounted.new()
 	var source_tackle: TackleResult = source
 	var tackle_copy: TackleResult = TackleResult.new()
 	tackle_copy.outcome = source_tackle.outcome
@@ -384,9 +402,14 @@ func _copy_result(source: RefCounted) -> RefCounted:
 
 
 func _property_name(property: Dictionary) -> String:
-	@warning_ignore("unsafe_cast")
-	var name_value: StringName = property["name"]
-	return String(name_value)
+	var raw_name: Variant = property.get("name", "")
+	if raw_name is String:
+		var property_name: String = raw_name
+		return property_name
+	if raw_name is StringName:
+		var property_name_value: StringName = raw_name
+		return String(property_name_value)
+	return ""
 
 
 func _resource_snapshot(resource: Resource) -> Dictionary:
@@ -395,7 +418,11 @@ func _resource_snapshot(resource: Resource) -> Dictionary:
 		return result
 	var names: Array[String] = []
 	for property: Dictionary in resource.get_property_list():
-		if property.usage & PROPERTY_USAGE_SCRIPT_VARIABLE:
+		var raw_usage: Variant = property.get("usage", 0)
+		if not raw_usage is int:
+			continue
+		var usage: int = raw_usage
+		if usage & PROPERTY_USAGE_SCRIPT_VARIABLE:
 			names += [_property_name(property)]
 	names.sort()
 	for property_name: String in names:

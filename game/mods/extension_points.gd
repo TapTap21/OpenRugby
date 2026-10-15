@@ -152,8 +152,9 @@ func configuration_snapshot() -> Dictionary:
 			var script_path: String = ""
 			var callback_object: Object = hook.callable.get_object()
 			if callback_object != null:
-				var script: Script = callback_object.get_script() as Script
-				if script != null:
+				var script_value: Variant = callback_object.get_script()
+				if script_value is Script:
+					var script: Script = script_value
 					script_path = script.resource_path
 			(
 				hooks_data

@@ -84,12 +84,17 @@ static func from_snapshot(data: Dictionary) -> S2RuntimeResult:
 	result.catch_result = _restore_catch(data.get("catch_result", {}))
 	result.pickup_result = _restore_pickup(data.get("pickup_result", {}))
 	result.tackle_result = _restore_tackle(data.get("tackle_result", {}), result.command_kind)
+	var kick_data: Dictionary = data["kick_launch"]
+	var pass_data: Dictionary = data["pass_launch"]
+	var catch_data: Dictionary = data["catch_result"]
+	var pickup_data: Dictionary = data["pickup_result"]
+	var tackle_data: Dictionary = data["tackle_result"]
 	if (
-		(not data["kick_launch"].is_empty() and result.kick_launch == null)
-		or (not data["pass_launch"].is_empty() and result.pass_launch == null)
-		or (not data["catch_result"].is_empty() and result.catch_result == null)
-		or (not data["pickup_result"].is_empty() and result.pickup_result == null)
-		or (not data["tackle_result"].is_empty() and result.tackle_result == null)
+		(not kick_data.is_empty() and result.kick_launch == null)
+		or (not pass_data.is_empty() and result.pass_launch == null)
+		or (not catch_data.is_empty() and result.catch_result == null)
+		or (not pickup_data.is_empty() and result.pickup_result == null)
+		or (not tackle_data.is_empty() and result.tackle_result == null)
 		or not result._payload_matches_kind()
 	):
 		return null
@@ -146,9 +151,11 @@ func _payload_matches_kind() -> bool:
 
 
 static func _restore_kick(data: Variant) -> KickLaunch:
-	if typeof(data) != TYPE_DICTIONARY or data.is_empty():
+	if not data is Dictionary:
 		return null
 	var value: Dictionary = data
+	if value.is_empty():
+		return null
 	var velocity: Variant = value.get("velocity", [])
 	var spin: Variant = value.get("spin", [])
 	if (
@@ -157,18 +164,23 @@ static func _restore_kick(data: Variant) -> KickLaunch:
 		or typeof(value.get("unresolved")) != TYPE_BOOL
 	):
 		return null
-	if typeof(velocity) != TYPE_ARRAY or velocity.size() != 3:
+	if not velocity is Array:
 		return null
+	var velocity_values: Array = velocity
+	if velocity_values.size() != 3:
+		return null
+	if not spin is Array:
+		return null
+	var spin_values: Array = spin
 	if (
-		typeof(spin) != TYPE_ARRAY
-		or spin.size() != 3
-		or not _number_array(velocity)
-		or not _number_array(spin)
+		spin_values.size() != 3
+		or not _number_array(velocity_values)
+		or not _number_array(spin_values)
 	):
 		return null
 	var result: KickLaunch = KickLaunch.new()
-	result.velocity_m_s = Vector3(velocity[0], velocity[1], velocity[2])
-	result.spin_rad_s = Vector3(spin[0], spin[1], spin[2])
+	result.velocity_m_s = _vector3_from_number_array(velocity_values)
+	result.spin_rad_s = _vector3_from_number_array(spin_values)
 	result.kick_type = value["kick_type"]
 	result.unresolved = value["unresolved"]
 	if (
@@ -181,9 +193,11 @@ static func _restore_kick(data: Variant) -> KickLaunch:
 
 
 static func _restore_pass(data: Variant) -> PassLaunch:
-	if typeof(data) != TYPE_DICTIONARY or data.is_empty():
+	if not data is Dictionary:
 		return null
 	var value: Dictionary = data
+	if value.is_empty():
+		return null
 	var velocity: Variant = value.get("velocity", [])
 	var target: Variant = value.get("target", [])
 	if (
@@ -192,13 +206,19 @@ static func _restore_pass(data: Variant) -> PassLaunch:
 		or typeof(value.get("unresolved")) != TYPE_BOOL
 	):
 		return null
-	if typeof(velocity) != TYPE_ARRAY or velocity.size() != 3 or not _number_array(velocity):
+	if not velocity is Array:
 		return null
-	if typeof(target) != TYPE_ARRAY or target.size() != 3 or not _number_array(target):
+	var velocity_values: Array = velocity
+	if velocity_values.size() != 3 or not _number_array(velocity_values):
+		return null
+	if not target is Array:
+		return null
+	var target_values: Array = target
+	if target_values.size() != 3 or not _number_array(target_values):
 		return null
 	var result: PassLaunch = PassLaunch.new()
-	result.velocity_m_s = Vector3(velocity[0], velocity[1], velocity[2])
-	result.target_m = Vector3(target[0], target[1], target[2])
+	result.velocity_m_s = _vector3_from_number_array(velocity_values)
+	result.target_m = _vector3_from_number_array(target_values)
 	result.flight_time_s = value["flight_time_s"]
 	result.unresolved = value["unresolved"]
 	if (
@@ -212,9 +232,11 @@ static func _restore_pass(data: Variant) -> PassLaunch:
 
 
 static func _restore_catch(data: Variant) -> CatchResult:
-	if typeof(data) != TYPE_DICTIONARY or data.is_empty():
+	if not data is Dictionary:
 		return null
 	var value: Dictionary = data
+	if value.is_empty():
+		return null
 	if (
 		value.size() != 3
 		or typeof(value.get("outcome")) != TYPE_INT
@@ -245,9 +267,11 @@ static func _restore_catch(data: Variant) -> CatchResult:
 
 
 static func _restore_pickup(data: Variant) -> PickupResult:
-	if typeof(data) != TYPE_DICTIONARY or data.is_empty():
+	if not data is Dictionary:
 		return null
 	var value: Dictionary = data
+	if value.is_empty():
+		return null
 	if (
 		value.size() != 2
 		or typeof(value.get("outcome")) != TYPE_INT
@@ -267,9 +291,11 @@ static func _restore_pickup(data: Variant) -> PickupResult:
 
 
 static func _restore_tackle(data: Variant, command_kind: int) -> TackleResult:
-	if typeof(data) != TYPE_DICTIONARY or data.is_empty():
+	if not data is Dictionary:
 		return null
 	var value: Dictionary = data
+	if value.is_empty():
+		return null
 	if (
 		value.size() != 9
 		or typeof(value.get("outcome")) != TYPE_INT
@@ -359,6 +385,23 @@ static func _restore_tackle(data: Variant, command_kind: int) -> TackleResult:
 
 static func _number_array(value: Array) -> bool:
 	for component: Variant in value:
-		if typeof(component) != TYPE_FLOAT and typeof(component) != TYPE_INT:
+		if not component is float and not component is int:
 			return false
 	return true
+
+
+static func _vector3_from_number_array(value: Array) -> Vector3:
+	var x: float = _number_as_float(value[0])
+	var y: float = _number_as_float(value[1])
+	var z: float = _number_as_float(value[2])
+	return Vector3(x, y, z)
+
+
+static func _number_as_float(value: Variant) -> float:
+	if value is float:
+		var float_value: float = value
+		return float_value
+	if value is int:
+		var int_value: int = value
+		return int_value
+	return NAN

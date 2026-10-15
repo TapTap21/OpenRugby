@@ -102,7 +102,9 @@ static func kick(
 
 
 ## Creates a pass action with the caller-resolved ballistic path and explicit assist inputs.
-static func pass(launch: PassLaunch, assist_setting: int, direction: float) -> S2RuntimeCommand:
+static func pass_ball(
+	launch: PassLaunch, assist_setting: int, direction: float
+) -> S2RuntimeCommand:
 	var command: S2RuntimeCommand = S2RuntimeCommand.new()
 	command.kind = Kind.PASS
 	command.pass_launch = _copy_pass(launch)
@@ -496,14 +498,32 @@ static func from_snapshot(data: Dictionary) -> S2RuntimeCommand:
 		return null
 	if not data.has("sequence") or typeof(data["sequence"]) != TYPE_INT:
 		return null
+	var kind_value: int = data["kind"]
+	var ball_mode_value: Variant = data.get("ball_mode", BallState.Mode.UNRESOLVED)
+	var goal_kick_state_value: Variant = data.get(
+		"goal_kick_state", BallState.GoalKickState.UNRESOLVED
+	)
+	var catch_candidate_value: Variant = data.get("catch_candidate", CandidateState.UNRESOLVED)
+	var catch_gate_value: Variant = data.get("catch_gate", GateState.UNRESOLVED)
+	if (
+		not ball_mode_value is int
+		or not goal_kick_state_value is int
+		or not catch_candidate_value is int
+		or not catch_gate_value is int
+	):
+		return null
+	var ball_mode_int: int = ball_mode_value
+	var goal_kick_state_int: int = goal_kick_state_value
+	var catch_candidate_int: int = catch_candidate_value
+	var catch_gate_int: int = catch_gate_value
 	var command: S2RuntimeCommand = S2RuntimeCommand.new()
-	command.kind = int(data["kind"])
+	command.kind = kind_value
 	command.sequence = data["sequence"]
 	command.actor_id = data["actor_id"]
 	if command.sequence < -1:
 		return null
-	command.ball_mode = int(data.get("ball_mode", BallState.Mode.UNRESOLVED))
-	command.goal_kick_state = int(data.get("goal_kick_state", BallState.GoalKickState.UNRESOLVED))
+	command.ball_mode = ball_mode_int
+	command.goal_kick_state = goal_kick_state_int
 	command.kick_type = data.get("kick_type", -1)
 	command.gauge = data.get("gauge", NAN)
 	command.kicking_power = data.get("kicking_power", NAN)
@@ -516,9 +536,9 @@ static func from_snapshot(data: Dictionary) -> S2RuntimeCommand:
 	command.place_meter_error = data.get("place_meter_error", NAN)
 	command.forward_assist_setting = data.get("forward_assist_setting", -1)
 	command.attack_direction = data.get("attack_direction", NAN)
-	command.catch_candidate = int(data.get("catch_candidate", CandidateState.UNRESOLVED))
+	command.catch_candidate = catch_candidate_int
 	command.catch_probability = data.get("catch_probability", NAN)
-	command.catch_gate = int(data.get("catch_gate", GateState.UNRESOLVED))
+	command.catch_gate = catch_gate_int
 	command.probability = data.get("probability", NAN)
 	command.ball_held = data.get("ball_held", false)
 	command.pickup_vertical_separation_m = data.get("pickup_vertical_separation_m", NAN)
@@ -531,14 +551,18 @@ static func from_snapshot(data: Dictionary) -> S2RuntimeCommand:
 	command.carrier_break_modifier = data.get("carrier_break_modifier", NAN)
 	command.out_of_position = data.get("out_of_position", false)
 	command.tackling_fatigue_snapshot = _restore_fatigue(data["tackling_fatigue"])
-	command.player_input = _restore_player_input(data.get("player_input", {}))
-	command.wind_policy = _restore_wind_policy(data.get("wind_policy", {}))
-	command.pass_launch = _restore_pass_launch(data.get("pass_launch", {}))
+	var player_input_data: Dictionary = data["player_input"]
+	var wind_policy_data: Dictionary = data["wind_policy"]
+	var pass_launch_data: Dictionary = data["pass_launch"]
+	var tackling_fatigue_data: Dictionary = data["tackling_fatigue"]
+	command.player_input = _restore_player_input(player_input_data)
+	command.wind_policy = _restore_wind_policy(wind_policy_data)
+	command.pass_launch = _restore_pass_launch(pass_launch_data)
 	if (
-		(not data["player_input"].is_empty() and command.player_input == null)
-		or (not data["wind_policy"].is_empty() and command.wind_policy == null)
-		or (not data["pass_launch"].is_empty() and command.pass_launch == null)
-		or (not data["tackling_fatigue"].is_empty() and command.tackling_fatigue_snapshot == null)
+		(not player_input_data.is_empty() and command.player_input == null)
+		or (not wind_policy_data.is_empty() and command.wind_policy == null)
+		or (not pass_launch_data.is_empty() and command.pass_launch == null)
+		or (not tackling_fatigue_data.is_empty() and command.tackling_fatigue_snapshot == null)
 	):
 		return null
 	return command if command.validate().is_empty() else null
@@ -633,17 +657,19 @@ static func _restore_fatigue(data: Variant) -> PlayerFatigueSnapshot:
 
 
 static func _restore_wind_policy(data: Variant) -> S2WindPolicy:
-	if typeof(data) != TYPE_DICTIONARY:
+	if not data is Dictionary:
 		return null
 	var wind_data: Dictionary = data
 	if wind_data.is_empty():
 		return null
-	var vector: Variant = wind_data.get("vector_km_h", [])
+	var raw_vector: Variant = wind_data.get("vector_km_h", [])
+	if not raw_vector is Array:
+		return null
+	var vector: Array = raw_vector
 	if (
 		wind_data.size() != 3
 		or typeof(wind_data.get("resolved")) != TYPE_BOOL
 		or typeof(wind_data.get("enabled")) != TYPE_BOOL
-		or typeof(vector) != TYPE_ARRAY
 		or vector.size() != 3
 		or not _number_array(vector)
 	):
@@ -651,7 +677,7 @@ static func _restore_wind_policy(data: Variant) -> S2WindPolicy:
 	var result: S2WindPolicy = S2WindPolicy.new()
 	result.resolved = wind_data.get("resolved", false)
 	result.enabled = wind_data.get("enabled", false)
-	result.vector_km_h = Vector3(vector[0], vector[1], vector[2])
+	result.vector_km_h = _vector3_from_number_array(vector)
 	if not result.is_valid():
 		return null
 	return result
@@ -663,23 +689,25 @@ static func _restore_pass_launch(data: Variant) -> PassLaunch:
 	var pass_data: Dictionary = data
 	if pass_data.is_empty():
 		return null
-	var velocity: Variant = pass_data.get("velocity", [])
-	var target: Variant = pass_data.get("target", [])
+	var raw_velocity: Variant = pass_data.get("velocity", [])
+	var raw_target: Variant = pass_data.get("target", [])
+	if not raw_velocity is Array or not raw_target is Array:
+		return null
+	var velocity: Array = raw_velocity
+	var target: Array = raw_target
 	if (
 		pass_data.size() != 4
 		or typeof(pass_data.get("flight_time_s")) != TYPE_FLOAT
 		or typeof(pass_data.get("unresolved")) != TYPE_BOOL
-		or typeof(velocity) != TYPE_ARRAY
 		or velocity.size() != 3
 		or not _number_array(velocity)
-		or typeof(target) != TYPE_ARRAY
 		or target.size() != 3
 		or not _number_array(target)
 	):
 		return null
 	var result: PassLaunch = PassLaunch.new()
-	result.velocity_m_s = Vector3(velocity[0], velocity[1], velocity[2])
-	result.target_m = Vector3(target[0], target[1], target[2])
+	result.velocity_m_s = _vector3_from_number_array(velocity)
+	result.target_m = _vector3_from_number_array(target)
 	result.flight_time_s = pass_data["flight_time_s"]
 	result.unresolved = pass_data["unresolved"]
 	if (
@@ -697,3 +725,20 @@ static func _number_array(value: Array) -> bool:
 		if typeof(component) != TYPE_FLOAT and typeof(component) != TYPE_INT:
 			return false
 	return true
+
+
+static func _vector3_from_number_array(value: Array) -> Vector3:
+	var x: float = _number_as_float(value[0])
+	var y: float = _number_as_float(value[1])
+	var z: float = _number_as_float(value[2])
+	return Vector3(x, y, z)
+
+
+static func _number_as_float(value: Variant) -> float:
+	if value is float:
+		var float_value: float = value
+		return float_value
+	if value is int:
+		var int_value: int = value
+		return int_value
+	return NAN

@@ -15,16 +15,20 @@ var wind_policy: S2WindPolicy
 func validate() -> PackedStringArray:
 	var errors: PackedStringArray = []
 	if mode < BallState.Mode.HELD or mode > BallState.Mode.ROLLING:
-		errors.append("owner must supply a resolved BallMode")
+		if not errors.push_back("owner must supply a resolved BallMode"):
+			return errors
 	if (
 		goal_kick_state < BallState.GoalKickState.OFF
 		or goal_kick_state > BallState.GoalKickState.ACTIVE
 	):
-		errors.append("owner must supply a resolved GoalKickState")
+		if not errors.push_back("owner must supply a resolved GoalKickState"):
+			return errors
 	if not position_m.is_finite() or not linear_velocity_m_s.is_finite():
-		errors.append("ball position and linear velocity must be finite")
+		if not errors.push_back("ball position and linear velocity must be finite"):
+			return errors
 	if not angular_velocity_rad_s.is_finite() or not _quaternion_is_valid(orientation):
-		errors.append("ball orientation and angular velocity must be finite")
+		if not errors.push_back("ball orientation and angular velocity must be finite"):
+			return errors
 	return errors
 
 

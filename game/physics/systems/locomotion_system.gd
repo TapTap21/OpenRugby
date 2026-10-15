@@ -47,7 +47,7 @@ func tick(sim: MatchSim) -> void:
 				var detail: String = (
 					"missing per-tick fatigue/movement input for %s" % player.player_id
 				)
-				unresolved_inputs.append(detail)
+				unresolved_inputs += PackedStringArray([detail])
 				if runtime_port != null:
 					runtime_port.fail_tick(detail)
 				return
@@ -154,14 +154,27 @@ func restore_transaction_checkpoint(checkpoint: SimDependencyCheckpoint) -> bool
 	if checkpoint == null or not checkpoint.complete:
 		return false
 	var saved: Dictionary = checkpoint.state
+	var unresolved_value: Variant = saved.get("unresolved_inputs")
+	if not unresolved_value is PackedStringArray:
+		return false
+	var restored_unresolved_inputs: PackedStringArray = unresolved_value
+	var updated_ids_value: Variant = saved.get("updated_player_ids")
+	if not updated_ids_value is Dictionary:
+		return false
+	var restored_updated_player_ids: Dictionary[StringName, bool] = {}
+	for player_id: Variant in updated_ids_value:
+		var is_updated: Variant = updated_ids_value[player_id]
+		if not player_id is StringName or not is_updated is bool:
+			return false
+		restored_updated_player_ids[player_id] = is_updated
 	players.clear()
 	for player: PlayerMotionState in saved["players"]:
 		players.append(player.duplicate_state())
 	pitch_condition = saved["pitch_condition"]
 	fatigue_option = saved["fatigue_option"]
-	unresolved_inputs = saved["unresolved_inputs"].duplicate()
+	unresolved_inputs = restored_unresolved_inputs.duplicate()
 	_initial_inputs_available = saved["initial_inputs_available"]
-	_updated_player_ids = saved["updated_player_ids"].duplicate()
+	_updated_player_ids = restored_updated_player_ids
 	return true
 
 
@@ -272,9 +285,14 @@ func _copy_fatigue(source: PlayerFatigueSnapshot) -> PlayerFatigueSnapshot:
 
 
 func _property_name(property: Dictionary) -> String:
-	@warning_ignore("unsafe_cast")
-	var name_value: StringName = property["name"]
-	return String(name_value)
+	var raw_name: Variant = property.get("name", "")
+	if raw_name is String:
+		var property_name: String = raw_name
+		return property_name
+	if raw_name is StringName:
+		var property_name_value: StringName = raw_name
+		return String(property_name_value)
+	return ""
 
 
 func _resource_snapshot(resource: Resource) -> Dictionary:
@@ -283,7 +301,11 @@ func _resource_snapshot(resource: Resource) -> Dictionary:
 		return result
 	var names: Array[String] = []
 	for property: Dictionary in resource.get_property_list():
-		if property.usage & PROPERTY_USAGE_SCRIPT_VARIABLE:
+		var usage_value: Variant = property.get("usage", 0)
+		if not usage_value is int:
+			continue
+		var usage: int = usage_value
+		if usage & PROPERTY_USAGE_SCRIPT_VARIABLE:
 			names += [_property_name(property)]
 	names.sort()
 	for property_name: String in names:

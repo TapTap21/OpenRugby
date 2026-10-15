@@ -28,6 +28,8 @@ var last_tick_succeeded: bool = true
 
 var _valid: bool = false
 var _finished: bool = false
+var _stopped: bool = false
+var _stop_reason: StringName = &""
 var _systems: Array[SimSystem] = []
 var _pending_triggers: Array[StringName] = []
 var _current: InputFrame
@@ -75,7 +77,7 @@ func add_system(system: SimSystem) -> void:
 
 ## Runs one simulation tick with [param frame] as the input.
 func tick(frame: InputFrame) -> void:
-	if not _valid or _finished:
+	if not _valid or _finished or _stopped:
 		last_tick_succeeded = false
 		return
 	var system_checkpoints: Array[SimDependencyCheckpoint] = []
@@ -116,8 +118,10 @@ func tick(frame: InputFrame) -> void:
 		if s2_runtime_port != null and not s2_runtime_port.tick_succeeded():
 			break
 	if s2_runtime_port != null and not s2_runtime_port.tick_succeeded():
+		var restore_failed: bool = false
 		for index: int in range(_systems.size() - 1, -1, -1):
 			if not _systems[index].restore_transaction_checkpoint(system_checkpoints[index]):
+				restore_failed = true
 				s2_runtime_port.fail_tick(
 					"%s failed to restore its tick checkpoint" % _systems[index].system_id()
 				)
@@ -132,7 +136,11 @@ func tick(frame: InputFrame) -> void:
 		flow = original_flow
 		_restore_flow_state(flow, original_flow_state)
 		_finished = original_finished
-		s2_runtime_port.rollback_tick()
+		if not s2_runtime_port.rollback_tick():
+			restore_failed = true
+		if restore_failed:
+			_stopped = true
+			_stop_reason = &"rollback_restore_failed"
 		last_tick_succeeded = false
 		return
 	var def: MatchStateDef = flow.current_def()
@@ -163,6 +171,16 @@ func current_state() -> StringName:
 ## True once a terminal state was entered.
 func is_finished() -> bool:
 	return _finished
+
+
+## True after an incomplete tick rollback; stopped simulations cannot be retried.
+func is_stopped() -> bool:
+	return _stopped
+
+
+## Stable fatal rollback reason, or an empty name while the sim is not stopped.
+func stop_reason() -> StringName:
+	return _stop_reason
 
 
 ## True when flow data marks the current state as simulation-active.
