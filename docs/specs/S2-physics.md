@@ -347,8 +347,9 @@ must exercise the same S2 systems.
   and travels 40.82 m ±0.1.
 - **B-02** Predictor from (0,2.1,0), v=(5,0,0), gravity: first contact at 0.639 s; post-bounce
   `v_y=3.444 m/s`, `v_x=4.425 m/s`.
-- **B-03** Predictor changes to rolling below 0.01 s hop time; horizontal acceleration is
-  `−0.8*v_xz`.
+- **B-03** Predictor changes to rolling only when a later segment's contact time is below 0.01 s;
+  the first segment never selects rolling. Rolling sets vertical velocity/acceleration to zero,
+  applies horizontal acceleration `−0.8*v_xz` for at most 1.25 s, then stops.
 - **B-04** Aero force is zero outside the goal-kick state for any velocity.
 - **B-05** Goal-kick aero: specified 10 m/s, Cd 0.5 case gives Fz=−1.395 N ±0.01; at 25 m/s,
   Cd=0.2.
@@ -374,6 +375,9 @@ must exercise the same S2 systems.
   changes the ball from held to free flight before the solver gate, the gate sees the post-action
   mode and adds 200. If the ball remains held/attached/frozen at the gate, neither accumulator nor
   solver state changes. This locks the documented S2 tick contract pending RE caller evidence.
+- **B-15** If the predictor's contact-time calculation is non-finite, it stops without advancing
+  that segment. The optional extra controller force remains omitted unless a caller explicitly
+  injects a resolved force policy; it is never guessed by the predictor.
 
 ### Passing / catching / pickup
 
