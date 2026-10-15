@@ -71,7 +71,7 @@ func _remove(path: String) -> void:
 		var removed: Error = DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
 
 
-## I-08: apply_defaults puts all 17 actions in InputMap and the default Cross button for kick.
+## I-08: apply_defaults puts all 20 actions in InputMap and the default Cross button for kick.
 func test_i08_apply_defaults_fills_input_map() -> void:
 	var bindings: InputBindings = _defaults()
 	var missing: Array[String] = []

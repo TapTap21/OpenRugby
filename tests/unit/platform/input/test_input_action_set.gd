@@ -20,7 +20,7 @@ func _action(action_id: StringName, context: InputActionDef.Context) -> InputAct
 	return action
 
 
-## I-01: the default action set loads, validates, and has the 17 actions, contexts and keys.
+## I-01: the default action set loads, validates, and has the observed mapped action contexts.
 func test_i01_default_set_loads_with_expected_actions() -> void:
 	var action_set: InputActionSet = _fresh_set()
 	@warning_ignore("unused_variable")
@@ -30,7 +30,7 @@ func test_i01_default_set_loads_with_expected_actions() -> void:
 	@warning_ignore("unused_variable")
 	var r2: GdUnitIntAssert = assert_int(action_set.validate().size()).is_equal(0)
 	@warning_ignore("unused_variable")
-	var r3: GdUnitIntAssert = assert_int(action_set.actions.size()).is_equal(17)
+	var r3: GdUnitIntAssert = assert_int(action_set.actions.size()).is_equal(20)
 	var expected: Dictionary = {
 		"move_up": InputActionDef.Context.MATCH,
 		"move_down": InputActionDef.Context.MATCH,
@@ -42,6 +42,9 @@ func test_i01_default_set_loads_with_expected_actions() -> void:
 		"kick": InputActionDef.Context.MATCH,
 		"tackle": InputActionDef.Context.MATCH,
 		"switch_player": InputActionDef.Context.MATCH,
+		"kick_up_and_under": InputActionDef.Context.MATCH,
+		"kick_grubber": InputActionDef.Context.MATCH,
+		"drop_kick": InputActionDef.Context.MATCH,
 		"pause": InputActionDef.Context.SYSTEM,
 		"ui_accept": InputActionDef.Context.UI,
 		"ui_cancel": InputActionDef.Context.UI,
@@ -94,8 +97,21 @@ func test_i02_defaults_bound_and_keys_translated() -> void:
 func test_i03_button_bits_and_axes() -> void:
 	var action_set: InputActionSet = _fresh_set()
 	@warning_ignore("unused_variable")
-	var r1: GdUnitArrayAssert = assert_array(action_set.button_actions()).is_equal(
-		[&"sprint", &"pass_left", &"pass_right", &"kick", &"tackle", &"switch_player"]
+	var r1: GdUnitArrayAssert = (
+		assert_array(action_set.button_actions())
+		. is_equal(
+			[
+				&"sprint",
+				&"pass_left",
+				&"pass_right",
+				&"kick",
+				&"tackle",
+				&"switch_player",
+				&"kick_up_and_under",
+				&"kick_grubber",
+				&"drop_kick",
+			]
+		)
 	)
 	@warning_ignore("unused_variable")
 	var r2: GdUnitIntAssert = assert_int(action_set.bit_of(&"kick")).is_equal(3)

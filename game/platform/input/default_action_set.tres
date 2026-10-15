@@ -1,4 +1,4 @@
-[gd_resource type="Resource" script_class="InputActionSet" load_steps=56 format=3]
+[gd_resource type="Resource" script_class="InputActionSet" load_steps=59 format=3]
 
 [ext_resource type="Script" path="res://game/platform/input/input_action_set.gd" id="1_set"]
 [ext_resource type="Script" path="res://game/platform/input/input_action_def.gd" id="2_action"]
@@ -190,6 +190,60 @@ gamepad_events = Array[InputEvent]([SubResource("ev23")])
 keyboard_events = Array[InputEvent]([SubResource("ev24")])
 provisional = true
 
+[sub_resource type="InputEventJoypadButton" id="ev_kick_up_and_under"]
+device = -1
+button_index = 2
+
+[sub_resource type="InputEventKey" id="key_kick_up_and_under"]
+device = -1
+physical_keycode = 81
+
+[sub_resource type="Resource" id="act_kick_up_and_under"]
+script = ExtResource("2_action")
+id = &"kick_up_and_under"
+context = 0
+display_name_key = "INPUT_ACTION_KICK_UP_AND_UNDER"
+deadzone = 0.2
+gamepad_events = Array[InputEvent]([SubResource("ev_kick_up_and_under")])
+keyboard_events = Array[InputEvent]([SubResource("key_kick_up_and_under")])
+provisional = true
+
+[sub_resource type="InputEventJoypadButton" id="ev_kick_grubber"]
+device = -1
+button_index = 3
+
+[sub_resource type="InputEventKey" id="key_kick_grubber"]
+device = -1
+physical_keycode = 87
+
+[sub_resource type="Resource" id="act_kick_grubber"]
+script = ExtResource("2_action")
+id = &"kick_grubber"
+context = 0
+display_name_key = "INPUT_ACTION_KICK_GRUBBER"
+deadzone = 0.2
+gamepad_events = Array[InputEvent]([SubResource("ev_kick_grubber")])
+keyboard_events = Array[InputEvent]([SubResource("key_kick_grubber")])
+provisional = true
+
+[sub_resource type="InputEventJoypadButton" id="ev_drop_kick"]
+device = -1
+button_index = 1
+
+[sub_resource type="InputEventKey" id="key_drop_kick"]
+device = -1
+physical_keycode = 69
+
+[sub_resource type="Resource" id="act_drop_kick"]
+script = ExtResource("2_action")
+id = &"drop_kick"
+context = 0
+display_name_key = "INPUT_ACTION_DROP_KICK"
+deadzone = 0.2
+gamepad_events = Array[InputEvent]([SubResource("ev_drop_kick")])
+keyboard_events = Array[InputEvent]([SubResource("key_drop_kick")])
+provisional = true
+
 [sub_resource type="InputEventJoypadButton" id="ev25"]
 device = -1
 button_index = 6
@@ -319,5 +373,5 @@ positive_y = &"move_down"
 [resource]
 script = ExtResource("1_set")
 id = &"default"
-actions = Array[InputActionDef]([SubResource("act_move_up"), SubResource("act_move_down"), SubResource("act_move_left"), SubResource("act_move_right"), SubResource("act_sprint"), SubResource("act_pass_left"), SubResource("act_pass_right"), SubResource("act_kick"), SubResource("act_tackle"), SubResource("act_switch_player"), SubResource("act_pause"), SubResource("act_ui_accept"), SubResource("act_ui_cancel"), SubResource("act_ui_up"), SubResource("act_ui_down"), SubResource("act_ui_left"), SubResource("act_ui_right")])
+actions = Array[InputActionDef]([SubResource("act_move_up"), SubResource("act_move_down"), SubResource("act_move_left"), SubResource("act_move_right"), SubResource("act_sprint"), SubResource("act_pass_left"), SubResource("act_pass_right"), SubResource("act_kick"), SubResource("act_tackle"), SubResource("act_switch_player"), SubResource("act_kick_up_and_under"), SubResource("act_kick_grubber"), SubResource("act_drop_kick"), SubResource("act_pause"), SubResource("act_ui_accept"), SubResource("act_ui_cancel"), SubResource("act_ui_up"), SubResource("act_ui_down"), SubResource("act_ui_left"), SubResource("act_ui_right")])
 axes = Array[InputAxisDef]([SubResource("axis_move")])
