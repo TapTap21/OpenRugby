@@ -21,7 +21,9 @@ func _init(p_action_set: InputActionSet, p_slot_count: int = 1) -> void:
 
 
 ## Fills [param frame] for [param tick] from slot 0 (all devices). Always returns true.
-func fill_frame(tick: int, frame: InputFrame) -> bool:
+func fill_frame(
+	tick: int, frame: InputFrame, _commands: DetachedCommandBundleBuilder = null
+) -> bool:
 	assert(frame.slot_count == _slot_count)
 	frame.tick = tick
 	frame.clear()

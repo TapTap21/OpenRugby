@@ -137,10 +137,16 @@ participant claim, claims)`; failure is `(false, non-OK, UNSUPPORTED, null, empt
 `ParticipantClaim` is the canonical participant identity consumed by setup fingerprinting and
 contains `stable_participant_id: String`, `participant_version: String`,
 `configuration_fingerprint: String`, and `deterministic_initial_state_fingerprint: String`.
-Every field must be stable, canonical, and non-empty. Setup rejects missing/malformed claims and
-duplicate stable participant identities. `system_id()` may remain a diagnostic/display accessor;
-its legacy default `&"system"` is never a participant identity or fingerprint input. Fake
-participants can construct both successful and failing `SetupResult` values directly.
+Every field must be stable, canonical, and non-empty. Setup has no external publication side
+effects: a post-setup claim collision can reject registration without leaving published state.
+Setup rejects missing/malformed claims and
+duplicate stable participant identities. `participant_id_hint() -> String` may provide a non-empty
+stable participant ID before setup; the sim rejects an already registered hint before invoking
+setup, then validates the canonical claim and provider identities returned by setup. Provider
+ownership can only be checked after setup exposes those claims. `system_id()` may remain a
+diagnostic/display accessor; its legacy default `&"system"` is never a participant identity or
+fingerprint input. Fake participants can construct both successful and failing `SetupResult` values
+directly.
 
 Every mutable registered participant, including the required S2 port-state owner adapter, uses
 exactly one generic typed replay factory:
@@ -169,9 +175,10 @@ no-argument signature once for each mutable entry in the effective ordered `SimS
 there is no overload or runtime method-arity dispatch. Ordinary live `build(request)` retains the
 supplied objects.
 
-`SystemTickResult` is a constructible value record: `ok: bool`, `error: Error`. Success is
-`ok = true, error = OK`; failure is `ok = false, error != OK`. A successful system tick has no
-separate value payload. A fake participant can return either shape directly.
+`SystemTickResult` is a constructible value record: `ok: bool`, `error: Error`, and ordered
+`outputs: Array[RefCounted]`. Each output record supplies `detached_copy()` returning a distinct
+same-script value. Success is `ok = true, error = OK`; failure is `ok = false, error != OK` and has
+no outputs. A fake participant can return either shape directly.
 
 `SimTickOwner extends SimSystem` is an opt-in owner participant in the same ordered system
 registry. It captures from an immutable generic `SimTickContext`, copied from candidate input and
@@ -303,7 +310,7 @@ stateful participant can use a non-empty immutable checkpoint value and return `
 a fake failure returns `CheckpointResult(false, null, ERR_FAILED)`. A dependency checkpoint is
 always a successfully captured value and has no independent `ok/error` status; provider checkpoint
 failure is represented by the containing `CheckpointResult`. `SimTickContext` exposes the
-1-based candidate tick, copied candidate
+1-based candidate tick, monotonically increasing per-sim `candidate_attempt_id`, copied candidate
 frame and previous-frame/edge view, detached typed command bundle, pre-tick clock/flow values, and
 the exact rational clock delta (`numerator`, positive `denominator`; zero represented as `0/1`).
 `SimTickOutcome` exposes the candidate tick, pre/post clock and flow values, selected transition
@@ -459,10 +466,13 @@ runner-owned live tick publishes through the existing MatchSim signal interface 
 complete row commit, then relays to EventBus and emits `ticked`; replay publishes only after output
 validation and replay finalization.
 
-`tick_checked(frame, commands)` copies and normalizes the candidate frame (using the wrong-shape
+`tick_checked(frame, commands)` allocates exactly one increasing `candidate_attempt_id` when a live
+attempt opens. Aborted and failed attempts do not rewind or reuse it; the counter is excluded from
+simulation snapshots and hashes. Replay attempts allocate at `begin_replay_row` and carry the same
+ID through `tick_replay_row` once that S2-owned seam is implemented. `tick_checked(frame, commands)` copies and normalizes the candidate frame (using the wrong-shape
 all-zero fallback) and seals a detached immutable copy of the typed command bundle before any
 mutation. Its opaque `PreparedTick` retains those exact immutable candidate values and exposes
-read-only copied frame access plus candidate provenance; no getter permits mutation of the retained
+read-only copied frame access, `candidate_attempt_id`, and candidate provenance; no getter permits mutation of the retained
 values. It then runs all fallible simulation phases without finalizing. On success it returns
 `PREPARED`, bound to this sim and exact candidate; the rollback checkpoint remains live.
 `finalize_prepared_tick(prepared_tick, append_token)` is
@@ -478,10 +488,25 @@ a tick only after validating its existing source row and finalizing sim state. T
 records that accompany this candidate; it introduces no universal command record or payload
 schema. `DetachedCommandBundleBuilder` is the mutable output object used only while sampling: its
 `append(existing_command_record) -> Error` accepts existing concrete typed command record values
-only (the existing command type/interface contract), preserving concrete types and order. It has
+only when the record implements `detached_copy() -> RefCounted`; the returned value must be a
+distinct object of the same concrete script type. The bundle calls that method for every ingress
+and egress and rejects a missing, null, same-object, or substituted-type copy. Its
+`records_in_order() -> Array[RefCounted]` returns defensive concrete copies in stable order, so an
+S2 port can enumerate its own types without accepting an S1 bundle type at the port boundary. It has
 no dictionary/variant payload overload and defines no new command payload schema. `seal() ->
 DetachedCommandBundle` copies/detaches the appended records into an immutable ordered bundle; a fresh builder seals to an immutable empty bundle. later
 builder or record mutation cannot change the sealed bundle. `InputSource.fill_frame` receives this builder as a submission builder. The runner copies the sampled frame and seals submissions before preparation. For live S2, it validates/enqueues those submitted records, reads and decodes the S2 port-assigned canonical `queued_command_snapshots()` into a distinct final typed candidate bundle, and pairs that bundle with the sampled frame. This exact pair is passed to `tick_checked`, retained by `PreparedTick`, encoded by the codec, and recorded. Non-S2 input uses the sealed submission bundle as its candidate; commandless input uses an immutable empty bundle. Replay supplies recorded records through the same typed codec/port route and treats the verified canonical port readback as the final candidate. The method performs one transaction:
+
+S1 generic row capabilities are `PreparedAppendToken` and `ReplaySourceRow` identities. The token's
+public no-argument construction is inert. An `InputLog` reserves a fully copied row before sim
+finalization; `MatchSim.finalize_prepared_tick` consumes only the exact token bound to its active
+prepared handle, and `InputLog.commit_append` publishes only after that exact sim finalization.
+Cancellation is allowed only before finalization. Abort leaves the reservation cancellable and
+invalidates sim finalization authority. Replay rows are detached, log-issued snapshots; caller
+constructed rows are inert. The checked-in tree does not yet contain the S2 codec/port or its typed
+replay-validation authority integration. Therefore direct replay receipt minting/finalization and
+S2 output validation remain blocked on the separately owned S2 implementation; S1 does not invent a
+generic replay codec or command/output record schema to bridge that absence.
 
 `MatchSim.tick(frame) -> TickResult` is a required compatibility wrapper for standalone sims. It
 calls `tick_checked(frame, DetachedCommandBundleBuilder.new().seal())`; on `PREPARED`, it finalizes
@@ -707,12 +732,16 @@ remain stable), `var header: ReplayHeader`, `_init(p_header: ReplayHeader)`,
 `read_replay_row(index: int) -> ReplaySourceRowResult`,
 `prepare_append(prepared_tick: PreparedTick, command_bundle: EncodedCommandBundle,
 output_bundle: PreparedOutputBundle) -> AppendPrepareResult`,
-`commit_append(token: PreparedAppendToken) -> void`, and
+`commit_append(token: PreparedAppendToken) -> Error`, and
 `cancel_append(token: PreparedAppendToken) -> Error`. The explicitly fixture/import-only
 `append_fixture_row(frame: InputFrame, command_records: Array[Dictionary],
 output_records: Array[Dictionary]) -> Error` supports manual serialization fixtures and legacy raw
 imports. It is never used by `MatchRunner`, does not finalize a sim tick, and makes no claim that a
-simulation tick committed; a wrong-shaped frame is rejected without changing the log. `PreparedOutputBundle` is opaque and can be
+simulation tick committed; a wrong-shaped frame is rejected without changing the log. The current
+S1 implementation does not yet contain the S2-owned `EncodedCommandBundle`, `PreparedOutputBundle`,
+`S2ReplayCodec`, or composition builder. Transactional production append and replay therefore remain
+unavailable; the checked-out generic dictionary preparation implementation is not the approved
+production API. `PreparedOutputBundle` is opaque and can be
 created only by `S2ReplayCodec.prepare_outputs(prepared_tick: PreparedTick) -> CodecResult` from
 that exact tick's validated detached `TickResult.outputs`; callers cannot pass an arbitrary output
 array to the codec. A successful bundle retains the prepared-tick identity, encoded detached output
@@ -771,7 +800,15 @@ source/encoded-command identity, candidate-frame identity, output-bundle identit
 reserved index/generation, and exact row identity. Only the exact internally minted token object with its private registered nonce is accepted; a
 caller-created object cannot reproduce that capability. Token fields and a token copy/reassembly
 constructor are not public. The log verifies all
-bindings and active reservation state on every use. `MatchSim.finalize_prepared_tick(prepared_tick, append_token)` requires the exact still-active tick and matching log token and consumes the prepared tick; `commit_append(append_token)` requires that same token to have been marked finalized by that sim. `finalize_prepared_tick`, `commit_append`, and `cancel_append` reject an inert caller-created token without consuming the active tick/reservation or publishing a row. Cancelled, consumed, stale, cross-log, cross-tick, independently-created-output, or row-substituted tokens are rejected and cannot publish. All validation, encoding, row construction/copying, and allocation happen before finalization, and ordinary failures abort the tick and cancel the token while rollback remains possible. No process-termination atomicity is promised: the enforceable contract is the capability pairing in normal execution. Finalization and commit are infallible, allocation-free, callback-free, with no callbacks between them; `commit_append` only publishes the already-built row. Thus the complete row is observable before staged sim signals, EventBus relays, or runner `ticked`.
+bindings and active reservation state on every use. `MatchSim.finalize_prepared_tick(prepared_tick, append_token)` requires the exact still-active tick and matching log token and consumes the prepared tick; `commit_append(append_token)` requires that same token to have been marked finalized by that sim. `finalize_prepared_tick`, `commit_append`, and `cancel_append` reject an inert caller-created token without consuming the active tick/reservation or publishing a row. Cancelled, consumed, stale, cross-log, cross-tick, independently-created-output, or row-substituted tokens are rejected and cannot publish. All validation, encoding, row construction/copying, and allocation happen before finalization, and ordinary failures abort the tick and cancel the token while rollback remains possible. No process-termination atomicity is promised: the enforceable contract is the capability pairing in normal execution. Finalization and valid-path `commit_append` are infallible, allocation-free, callback-free, with no callbacks between them; the Error-returning commit rejects invalid capabilities and returns `OK` after publishing the already-built row. Thus the complete row is observable before staged sim signals, EventBus relays, or runner `ticked`.
+
+The current implementation fails closed for replay entry points. `MatchReplay.run` returns null,
+`MatchRunner.start(ReplayInputSource)` returns `ERR_UNCONFIGURED`, and replay-source polling returns
+false until the S2 codec can validate complete source rows and mint the reviewed one-shot receipt.
+`finalize_replay_tick` returning `ERR_UNCONFIGURED` does not complete replay support. Remaining S2
+prerequisites include typed codec/bundle records, canonical port readback and one-time owner
+attachment, replay transaction opened at `begin_replay_row`, full-row validation, receipt authority,
+composition wiring, and v3 header/wire migration.
 
 The runner passes `tick_checked` the frame and detached typed command bundle represented by the
 port's authoritative readback. For replay, it uses the verified canonical port readback after

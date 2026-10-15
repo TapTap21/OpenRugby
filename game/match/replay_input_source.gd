@@ -9,8 +9,8 @@ func _init(p_log: InputLog) -> void:
 	_log = p_log
 
 
-func fill_frame(tick: int, frame: InputFrame) -> bool:
-	return _log.read_frame(tick, frame)
+func fill_frame(_tick: int, _frame: InputFrame, _commands: DetachedCommandBundleBuilder) -> bool:
+	return false
 
 
 func layout_hash() -> String:

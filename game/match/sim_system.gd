@@ -1,25 +1,49 @@
 class_name SimSystem
 extends RefCounted
-## Base class for simulation subsystems (ball, players, rules, AI) registered on a [MatchSim].
-##
-## Systems tick in registration order, which is part of the determinism contract.
+## Base class for ordered simulation participants.
 
 
-## Stable identifier used in snapshots.
+## Stable diagnostic identifier used in snapshots.
 func system_id() -> StringName:
 	return &"system"
 
 
-## Called once when the system is added to [param _sim].
-func setup(_sim: MatchSim) -> void:
-	pass
+## Optional stable participant identity known before setup; empty when setup must supply it.
+func participant_id_hint() -> String:
+	return ""
 
 
-## Called once per simulation tick, after the input frame has been applied.
+## Declares transaction capability and stable setup identity.
+func setup(_sim: MatchSim) -> SetupResult:
+	return SetupResult.new(false, ERR_UNCONFIGURED, TransactionCapability.UNSUPPORTED, null, [])
+
+
+## Legacy successful tick hook retained for existing subclasses.
 func tick(_sim: MatchSim) -> void:
 	pass
 
 
-## Returns this system's state for hashing and snapshots.
+## Checked tick entry point; by default it calls the legacy [method tick] hook.
+func tick_checked(sim: MatchSim, _context: SimTickContext) -> SystemTickResult:
+	tick(sim)
+	return SystemTickResult.new(true, OK)
+
+
+## Captures all state that can affect a future deterministic tick.
+func checkpoint() -> CheckpointResult:
+	return CheckpointResult.new(true, {}, OK)
+
+
+## Restores the value previously returned by [method checkpoint].
+func restore(_checkpoint_value: Variant) -> Error:
+	return ERR_UNCONFIGURED
+
+
+## Creates an independent initial participant for replay.
+func create_replay_instance() -> ReplayInstanceResult:
+	return ReplayInstanceResult.new(false, null, ERR_UNCONFIGURED, [])
+
+
+## Returns this participant's deterministic state for snapshots and hashing.
 func snapshot() -> Dictionary:
 	return {}

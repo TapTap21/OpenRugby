@@ -6,7 +6,7 @@ extends RefCounted
 
 
 ## Fills [param frame] for tick [param _tick]. Returns false when no more input exists.
-func fill_frame(_tick: int, frame: InputFrame) -> bool:
+func fill_frame(_tick: int, frame: InputFrame, _commands: DetachedCommandBundleBuilder) -> bool:
 	frame.clear()
 	return true
 

@@ -19,7 +19,7 @@ properties; they must not infer a different constructor from implementation code
 | `ParticipantClaim` | `game/match/participant_claim.gd` | `stable_participant_id: String`, `participant_version: String`, `configuration_fingerprint: String`, `deterministic_initial_state_fingerprint: String` |
 | `ProviderClaim` | `game/match/provider_claim.gd` | `provider: RefCounted`, `stable_provider_id: String`, `provider_version: String`, `transaction_capability: TransactionCapability`, `configuration_fingerprint: String`, `deterministic_initial_state_fingerprint: String` |
 | `ReplayInstanceResult` | `game/match/replay_instance_result.gd` | `ok: bool`, `instance: SimSystem | null`, `error: Error`, `owned_provider_claims: Array[ProviderClaim]` |
-| `SystemTickResult` | `game/match/system_tick_result.gd` | `ok: bool`, `error: Error` |
+| `SystemTickResult` | `game/match/system_tick_result.gd` | `ok: bool`, `error: Error`, `outputs: Array[RefCounted]`; `_init(p_ok: bool, p_error: Error, p_outputs: Array[RefCounted] = [])` |
 | `OwnerCapture` | `game/match/owner_capture.gd` | `payload: Variant` |
 | `OwnerCaptureResult` | `game/match/owner_capture_result.gd` | `ok: bool`, `capture: OwnerCapture | null`, `error: Error` |
 | `OwnerCommitResult` | `game/match/owner_commit_result.gd` | `ok: bool`, `error: Error` |
@@ -33,12 +33,14 @@ properties; they must not infer a different constructor from implementation code
 | `MatchReadinessReport` | `game/match/match_readiness_report.gd` | `blockers: Array[MatchReadinessBlocker]`; also `is_ready() -> bool` |
 | `MatchBuildResult` | `game/match/match_build_result.gd` | `ok: bool`, `sim: MatchSim | null`, `codec: S2ReplayCodec | null`, `setup_fingerprint: String`, `readiness: MatchReadinessReport`, `error: Error` |
 | `PreparedAppendToken` | `game/match/prepared_append_token.gd` | Opaque token; public no-argument constructor, no inspectable fields |
+| `AppendPrepareResult` | `game/match/append_prepare_result.gd` | `ok: bool`, `token: PreparedAppendToken | null`, `error: Error`; `_init(p_ok: bool, p_token: PreparedAppendToken, p_error: Error)` |
+| `ReplaySourceRowResult` | `game/match/replay_source_row_result.gd` | `ok: bool`, `row: ReplaySourceRow | null`, `error: Error` |
 | `ReplayValidationToken` | `game/match/replay_validation_token.gd` | Opaque token; public no-argument constructor, no inspectable fields |
 
 The paths for `TransactionCapability`, result/claim/checkpoint records, readiness/build records,
 opaque token types and `TickResult` are added here to make the already named public concepts
 locatable. `PreparedTick`, `SignalBatch`, `InputFrame`,
-`DetachedCommandBundle`, `MatchClock`, and match-flow definitions retain the APIs in S1-core.
+`DetachedCommandBundle`, `DetachedCommandBundleBuilder`, `MatchClock`, and match-flow definitions retain the APIs in S1-core. `DetachedCommandBundle.records_in_order()` returns `Array[RefCounted]` concrete defensive copies. Every command record must supply `detached_copy()` returning a distinct object of its same concrete script type. S2 must implement that method on its own record types and must enumerate before crossing its typed port boundary. `PreparedTick.candidate_attempt_id` exposes the same read-only primitive integer as the owner context. A live attempt allocates its ID when `tick_checked` opens; replay allocation is pending the reviewed S2 `begin_replay_row` seam.
 
 ## Construction and value semantics
 
@@ -49,7 +51,8 @@ For `Array[ProviderClaim]`, the constructor takes a typed array in the stated po
 detached array copy. `SetupResult` success is `(true, OK, declared capability, non-null valid
 ParticipantClaim, claims)`; failure is `(false, non-OK, UNSUPPORTED, null, [])`. `ReplayInstanceResult`
 success is `(true, fresh instance, OK, claims)` and failure is `(false, null, non-OK, [])`.
-`SystemTickResult` success/failure is `(true, OK)` / `(false, non-OK)`. `OwnerCaptureResult` is
+`SystemTickResult` constructor is `_init(p_ok: bool, p_error: Error, p_outputs: Array[RefCounted] = [])`;
+success/failure is `(true, OK, outputs)` / `(false, non-OK, [])`. `OwnerCaptureResult` is
 `(true, non-null capture, OK)` / `(false, null, non-OK)`. `OwnerCommitResult` is `(true, OK)` /
 `(false, non-OK)`. `CheckpointResult` is `(true, non-empty immutable value, OK)` for a transactional
 participant and `(false, null, non-OK)` for failure; only an explicitly stateless participant may
@@ -75,6 +78,7 @@ copied, hashed as an address, or exposed through another mutable record field.
 | Property | Type and meaning |
 |---|---|
 | `candidate_tick` | `int`, 1-based tick being evaluated |
+| `candidate_attempt_id` | `int`, monotonically increasing per-MatchSim attempt ID; never rewound or included in snapshots/hashes |
 | `candidate_frame` | detached `InputFrame` copy |
 | `previous_frame` | detached previous `InputFrame` copy; null before the first frame |
 | `pressed_buttons` | detached `PackedInt64Array`, per slot bitmask of newly held bits relative to `previous_frame` |
@@ -207,6 +211,19 @@ not set row values, copy an identity, or mint row authority. Only
 `InputLog.read_replay_row(index)` returns a populated row with usable log-bound identity. Passing
 the inert row to `MatchSim.begin_replay_row` returns `(false, null, ERR_INVALID_PARAMETER)` before
 checkpoint capture or port transaction, with no sim or port state change.
+
+`InputLog.prepare_append(prepared_tick, encoded_command_bundle, prepared_output_bundle) -> AppendPrepareResult`
+is the intended production contract, where both bundles are opaque S2 codec outputs bound to the
+exact candidate and prepared tick; this typed method is not implemented yet. The generic S2
+bundle/codec ownership split remains pending fix6. `InputLog.commit_append(token) -> Error` and
+`cancel_append(token) -> Error`; after typed preparation and finalization, valid commit only
+publishes the sealed row, while invalid capabilities return an error without changing visible rows.
+The non-codec `append_fixture_row(frame, command_records, output_records) -> Error` is
+fixture/import-only and cannot finalize a simulation tick. Production MatchRunner and replay remain
+unavailable until the reviewed S2 codec and typed bundles exist; tests must not use generic
+dictionaries as production command/output records. S2 prerequisites are its reviewed concrete
+records, `detached_copy()`, codec conversion and validation, canonical port readback, and replay
+receipt APIs.
 
 The S2-owned contract must separately specify concrete typed `S2RuntimePort` and
 `S2RuntimePortOwner` methods/claims/checkpoint state; `S2ReplayCodec` concrete record types,

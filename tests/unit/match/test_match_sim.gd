@@ -143,6 +143,9 @@ class ElapsedProbe:
 	extends SimSystem
 	var seen: Array[int] = []
 
+	func setup(_sim: MatchSim) -> SetupResult:
+		return TestMatchSim._stateless_setup("elapsed_probe")
+
 	func tick(sim: MatchSim) -> void:
 		@warning_ignore("return_value_discarded")
 		seen.append(sim.clock.elapsed_ticks)
@@ -181,6 +184,9 @@ class RecordSystem:
 	func system_id() -> StringName:
 		return _id
 
+	func setup(_sim: MatchSim) -> SetupResult:
+		return TestMatchSim._stateless_setup(String(_id))
+
 	func tick(_sim: MatchSim) -> void:
 		@warning_ignore("return_value_discarded")
 		_log.append(_id)
@@ -190,9 +196,53 @@ class RecordSystem:
 class WhistleSystem:
 	extends SimSystem
 
+	func setup(_sim: MatchSim) -> SetupResult:
+		return TestMatchSim._stateless_setup("whistle_system")
+
 	func tick(sim: MatchSim) -> void:
 		if sim.current_state() == MatchStateIds.IN_PLAY:
 			sim.raise_trigger(MatchTriggers.WHISTLE_BLOWN)
+
+
+class HintedSystem:
+	extends SimSystem
+	var setup_calls: int = 0
+
+	func participant_id_hint() -> String:
+		return "shared-hint"
+
+	func setup(_sim: MatchSim) -> SetupResult:
+		setup_calls += 1
+		return TestMatchSim._stateless_setup("shared-hint")
+
+
+static func _stateless_setup(participant_id: String) -> SetupResult:
+	var claim: ParticipantClaim = ParticipantClaim.new(participant_id, "1", "cfg", "initial")
+	return SetupResult.new(true, OK, TransactionCapability.EXPLICITLY_STATELESS, claim, [])
+
+
+func test_default_checkpoint_is_empty_success() -> void:
+	var result: CheckpointResult = SimSystem.new().checkpoint()
+	@warning_ignore("unused_variable")
+	var checkpoint_succeeded: GdUnitBoolAssert = assert_bool(result.ok).is_true()
+	@warning_ignore("unused_variable")
+	var checkpoint_empty: GdUnitBoolAssert = (
+		assert_bool(OwnerCapture._is_empty_checkpoint_value(result.value)).is_true()
+	)
+
+
+func test_duplicate_hinted_identity_is_rejected_before_second_setup() -> void:
+	var sim: MatchSim = MatchSim.new(_short_config())
+	var first: HintedSystem = HintedSystem.new()
+	var duplicate: HintedSystem = HintedSystem.new()
+	@warning_ignore("unused_variable")
+	var first_added: Error = sim.add_system(first)
+	@warning_ignore("unused_variable")
+	var rejected: GdUnitIntAssert = assert_int(sim.add_system(duplicate)).is_equal(
+		ERR_ALREADY_EXISTS
+	)
+	@warning_ignore("unused_variable")
+	var no_setup_side_effect: GdUnitIntAssert = assert_int(duplicate.setup_calls).is_equal(0)
 
 
 ## C-18: a system that raises WHISTLE_BLOWN in in_play moves the flow on the same tick.
