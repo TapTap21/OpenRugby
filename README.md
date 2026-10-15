@@ -18,61 +18,76 @@ loader. The "Modern" profile is a one-click preset of the first-party mods. See
 Linux, Windows and macOS (universal). The Compatibility renderer (OpenGL) is the default so the
 game runs on integrated graphics, the Steam Deck and older machines, including Linux without Vulkan.
 
-## You need your own copy of Rugby 08
+## Run the prototype
 
-OpenRugby contains no original game assets, binaries or decompiled code. Art, audio and data are
-extracted from **your own legally obtained copy of Rugby 08** by the tools in `tools/`, the same
-model OpenMW uses. Until the extractors land, the game runs on placeholder content.
+The sandbox is self-contained: it needs no Rugby 08 install or extracted data. It is a limited
+movement, ball-recovery, contact, kick and scoring prototype, not a complete Rugby match or the
+finished Classic game. The project's default scene remains unchanged; this launcher explicitly
+opens the sandbox scene.
 
-## Build and test
+Install Godot 4.7.2 (see `.godot-version`), then run:
 
-Requirements: Godot 4.7.2 (see `.godot-version`) with matching export templates,
-[gdtoolkit](https://github.com/Scony/godot-gdscript-toolkit) 4.x, Python 3.12+ and `uv`.
+On Windows, run this `.sh` launcher from Git Bash or WSL. Godot 4.7.2 must be available in that
+same shell on `PATH` or via `GODOT_BIN`. Command Prompt and PowerShell do not run this Bash script
+directly.
+
+```bash
+scripts/run-sandbox.sh
+```
+
+The launcher imports project resources on each launch, checks `scripts/check-godot-safe.sh`
+immediately before both Godot processes, then opens
+`res://game/prototype/prototype_sandbox.tscn`. It resolves the project path from its own location,
+so it can be run from any working directory. If Godot is not on `PATH`, set `GODOT_BIN` to an
+executable path. Controls: arrow keys move, Space sprints, and S kicks while the player carries
+the ball.
+
+The launcher runs these Godot commands using the absolute repository path in place of
+`/absolute/path/to/openrugby`; each safety check is immediately before its Godot process:
 
 ```bash
 scripts/check-godot-safe.sh
-godot --headless --path . --import      # first-time import
+godot --headless --path /absolute/path/to/openrugby --import
+
 scripts/check-godot-safe.sh
-godot --path .                          # run the game
+godot --path /absolute/path/to/openrugby res://game/prototype/prototype_sandbox.tscn
+```
+
+## Build and test
+
+Godot 4.7.2 is the only requirement to run the prototype. Matching export templates are needed to
+export builds. Install [gdtoolkit](https://github.com/Scony/godot-gdscript-toolkit) 4.x for lint
+and formatting checks. Python 3.12+ and `uv` are only needed for optional research tooling.
+
+```bash
 scripts/test.sh                         # gdUnit4 tests, headless, non-zero exit on failure
 gdlint game autoload tests              # lint
 gdformat --check --line-length 100 game autoload tests
 scripts/hygiene.sh                      # no original assets / decompiled code in git
-PYTHONPATH=tools python -m openrugby_tools.pipeline --game-dir original --out extracted   # archives, textures, audio, models
 scripts/check-godot-safe.sh
-godot --headless --export-release Linux build/openrugby.x86_64   # export (also Windows, macOS)
+godot --headless --path . --export-release Linux build/openrugby.x86_64   # also Windows, macOS
 ```
 
-### Run the provisional sandbox
+The export command has the safety guard immediately before its Godot process. Optional:
+`uv tool install pre-commit && pre-commit install` to run checks on every commit.
 
-The default project scene remains the title screen, and `godot --path .` still opens it. This
-explicit scene is a provisional generated-primitive sandbox with a limited movement, ball recovery,
-contact, kick and scoring loop: a quick way to run a small interactive scene, not a complete Rugby
-match or Classic gameplay.
+## Optional reverse-engineering tools
 
-```bash
-scripts/check-godot-safe.sh
-godot --headless --path . --import
+These local tools are only for behavioral and format research; they are not needed to clone, build,
+or run the prototype. Replacement runtime assets require no game copy. Access to a legally obtained
+Rugby 08 install is optional and is only used as research input by the local tools. Original files
+and extracted research data must remain local, gitignored, and outside runtime dependencies; never
+bundle or commit them.
 
-scripts/check-godot-safe.sh
-godot --path . res://game/prototype/prototype_sandbox.tscn
-```
-
-Controls: arrow keys move, Space sprints, and S kicks while the player carries the ball.
-
-Optional: `uv tool install pre-commit && pre-commit install` to run the checks on every commit.
-
-Your game files are linked into `original/` (gitignored). Godot scans every folder under the
-project, follows symlinks, and writes `.import` sidecars next to anything it recognises, so the
-install must never be visible to it. The setup script makes `original/` a real folder with a
-`.gdignore` and one link per install entry, and also protects `extracted/`:
+Godot follows symlinks and may write `.import` sidecars beside recognized files. The optional
+linking helper therefore creates a real `original/` folder with `.gdignore` and links each install
+entry inside it; it also marks `extracted/` with `.gdignore`. The safety check refuses to run Godot
+if either directory is a symlink or lacks its ignore marker.
 
 ```bash
 scripts/link-original.sh /path/to/Rugby08    # or set OPENRUGBY_GAME_DIR
+PYTHONPATH=tools python -m openrugby_tools.pipeline --game-dir original --out extracted
 ```
-
-`scripts/test.sh` runs `scripts/check-godot-safe.sh` first and refuses to start Godot if either
-folder is exposed. Run the check yourself before opening the project in the editor.
 
 ## Contributing
 
