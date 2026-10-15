@@ -210,6 +210,18 @@ geometry plus the spin that kicks impart** (see §2.6) [O/I].
     values; the exact torque form is I].
   * The solver aborts on oscillation, with the warnings "Aborting constraint
     %i due to oscillation" and "Aborting constraint solver" [O].
+  * **Matrix/RHS construction (partial static cross-check [O], evidence
+    `ev_c483209fa9396ecf09e5862fe6a482718ecfbc57b937d6c9226bb351a9bdbbd0`):**
+    0x4ba850 first zeros an N×N matrix, visits the active contact records, constructs
+    six-component per-contact row data, scales three components by a scalar, then adds
+    pair products to matrix entries in both directions. 0x4baa80 and 0x4babd0 each zero
+    an N-vector and accumulate per-contact terms from separate offsets in the contact
+    working record; 0x4bacf0 routes solved contact values through two vector-update paths.
+    The working-record offsets and
+    helper operations are not semantically typed in the decompilation. These observations
+    do **not** identify exact Jacobians, RHS signs/units, row order, pivot policy, or the
+    contact response represented by each vector. Keep those mechanics unresolved until a
+    typed field map or numeric reference fixture confirms them.
 * **Surface table [O]** (0x98e100, stride 20 bytes, ev_ae86498d). The index is
   the match pitch condition (match + 0x18d0, default 2; the missions' WEATHER
   `pitch` attribute also defaults to 2). Stadium ids 0x19 and 0x1d always use
