@@ -18,6 +18,11 @@ Contract: `docs/specs/S3-rules-bridge.md` from `docs/s3-rules-bridge` commit
   ends the period without a kickoff. A second-period transition stays explicitly
   unresolved; the completed conversion is retained and no extra-time/full-time
   result is guessed.
+- Period indices follow RE05's stored zero-based convention: 0 first half,
+  1 second half, 2–4 extra time 1–3. The unresolved additional gate applies only
+  to period 1. A non-ending report returns `PASSTHROUGH` with the stamped report
+  retained for the S1/full referee owner; this slice does not claim to apply its
+  ordinary scrum, penalty or free-kick restart.
 - `is_production_available()` remains false. The bridge lists the missing S1
   committed event/transition owner, S2 grounding and completed goal-kick facts,
   and S4 completed conversion provider. It is not wired into the live runner.
@@ -32,7 +37,7 @@ second-half period-end gate is unresolved in RE05 §7.6.
 
 ## Verification and next steps
 
-- `XDG_DATA_HOME=/tmp/openrugby-s3-score-loop-user scripts/test.sh`: 184/184
+- `XDG_DATA_HOME=/tmp/openrugby-s3-score-loop-user scripts/test.sh`: 185/185
   cases across 34 suites. The focused bridge suite has 9 passing cases.
 - `gdlint game tests`, `gdformat --check --line-length 100 game tests`
   (161 files), `scripts/hygiene.sh`, and `git diff --check`: pass.
@@ -40,8 +45,9 @@ second-half period-end gate is unresolved in RE05 §7.6.
   resource teardown warnings remain; Godot exited 0.
 - Focused bridge tests cover score arithmetic/snapshots, try-to-conversion,
   conversion idempotency, wrong-team rejection, inferred miss policy, the
-  time-up report whitelist, first-half time-up conversion, and unresolved
-  second-half handling.
+  time-up report whitelist, ordinary knock-on/forward-pass/penalty passthrough,
+  first-half time-up conversion, unresolved second-half handling, and normal
+  extra-time period-end handling.
 - Run `scripts/check-godot-safe.sh` immediately before each Godot test command.
 - Run `scripts/test.sh` with a temporary `XDG_DATA_HOME` to avoid the sandbox's
   unwritable default user-data path, then run `gdlint`, `gdformat --check`, and

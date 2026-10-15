@@ -25,7 +25,7 @@ func evaluate(
 		return GateResult.NO_END
 	if not _qualifies(report, period_end_game_seconds):
 		return GateResult.NO_END
-	if period_index == 2 and not second_half_transition_resolved:
+	if period_index == 1 and not second_half_transition_resolved:
 		return GateResult.SECOND_HALF_UNRESOLVED
 	return GateResult.END_PERIOD
 

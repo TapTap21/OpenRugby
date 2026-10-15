@@ -5,7 +5,7 @@ extends RefCounted
 # gdlint: disable=max-returns
 # Each boundary validation rejects before mutating score, pending attempt, or restart state.
 
-enum ResultCode { APPLIED, REJECTED, UNAVAILABLE, PERIOD_END_REQUESTED, UNRESOLVED }
+enum ResultCode { APPLIED, REJECTED, UNAVAILABLE, PERIOD_END_REQUESTED, UNRESOLVED, PASSTHROUGH }
 
 const MISSING_PROVIDERS: PackedStringArray = [
 	"S1 committed staged-event and period-transition owner",
@@ -28,7 +28,7 @@ var second_half_transition_resolved: bool = false
 var _team_ids: Array[StringName] = []
 var _game_time_seconds: float = 0.0
 var _period_end_game_seconds: float = 2400.0
-var _period_index: int = 1
+var _period_index: int = 0
 
 
 ## Configures the injected test/owner boundary for two stable teams.
@@ -41,7 +41,8 @@ func setup(
 	if (
 		p_rules == null
 		or not p_rules.validate().is_empty()
-		or period_index < 1
+		or period_index < 0
+		or period_index > 4
 		or not is_finite(period_end_game_seconds)
 		or period_end_game_seconds <= 0.0
 	):
@@ -129,7 +130,7 @@ func resolve_conversion(result: ConversionResult) -> ResultCode:
 		return _reject()
 	var ends_period: bool = period_state == PeriodEndPolicy.PeriodState.TIME_UP
 	var transition_unresolved: bool = (
-		ends_period and _period_index == 2 and not second_half_transition_resolved
+		ends_period and _period_index == 1 and not second_half_transition_resolved
 	)
 	var scoring_team: StringName = pending_conversion_team_id
 	var conceding_team: StringName = _opponent_of(scoring_team)
@@ -182,7 +183,7 @@ func process_report(report: RefereeReport) -> ResultCode:
 		period_state = PeriodEndPolicy.PeriodState.PERIOD_ENDED
 		last_restart = null
 		return ResultCode.PERIOD_END_REQUESTED
-	return ResultCode.APPLIED
+	return ResultCode.PASSTHROUGH
 
 
 ## Returns a stable state snapshot; restart and score are detached values.

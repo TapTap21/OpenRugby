@@ -7,10 +7,11 @@ const TEAM_B: StringName = &"team_b"
 const PLAYER_A: StringName = &"player_a"
 
 
-func _bridge(period_index: int = 1) -> S3ScoreRefereeBridge:
+func _bridge(period_index: int = 0) -> S3ScoreRefereeBridge:
 	var bridge: S3ScoreRefereeBridge = S3ScoreRefereeBridge.new()
 	var rules: RulesConfig = RulesConfig.new()
-	var end_time: float = 2400.0 if period_index == 1 else 4800.0
+	var period_end_times: Array[float] = [2400.0, 4800.0, 5400.0, 6000.0, 6600.0]
+	var end_time: float = period_end_times[period_index]
 	@warning_ignore("unused_variable")
 	var configured: bool = bridge.setup([TEAM_A, TEAM_B], rules, period_index, end_time)
 	return bridge
@@ -134,7 +135,7 @@ func test_wrong_team_conversion_result_is_rejected_without_state_change() -> voi
 
 ## An unresolved second-half transition preserves score without guessing the match result.
 func test_second_half_conversion_scores_but_transition_stays_unresolved() -> void:
-	var bridge: S3ScoreRefereeBridge = _bridge(2)
+	var bridge: S3ScoreRefereeBridge = _bridge(1)
 	@warning_ignore("unused_variable")
 	var clock_observed: bool = bridge.observe_clock(5000.0)
 	@warning_ignore("unused_variable")
@@ -218,14 +219,14 @@ func test_time_up_report_whitelist_and_second_half_unknown_gate() -> void:
 	lineout.report_time_game_seconds = 2400.0
 	@warning_ignore("unused_variable")
 	var r1: GdUnitIntAssert = (
-		assert_int(policy.evaluate(lineout, PeriodEndPolicy.PeriodState.TIME_UP, 1, 2400.0))
+		assert_int(policy.evaluate(lineout, PeriodEndPolicy.PeriodState.TIME_UP, 0, 2400.0))
 		. is_equal(PeriodEndPolicy.GateResult.END_PERIOD)
 	)
 	lineout.reason = RefereeReport.StoppageReason.TRY
 	lineout.decision = RefereeReport.Decision.CONVERSION
 	@warning_ignore("unused_variable")
 	var r2: GdUnitIntAssert = (
-		assert_int(policy.evaluate(lineout, PeriodEndPolicy.PeriodState.TIME_UP, 1, 2400.0))
+		assert_int(policy.evaluate(lineout, PeriodEndPolicy.PeriodState.TIME_UP, 0, 2400.0))
 		. is_equal(PeriodEndPolicy.GateResult.NO_END)
 	)
 	lineout.reason = RefereeReport.StoppageReason.BALL_IN_TOUCH
@@ -233,9 +234,54 @@ func test_time_up_report_whitelist_and_second_half_unknown_gate() -> void:
 	lineout.report_time_game_seconds = 4800.0
 	@warning_ignore("unused_variable")
 	var r3: GdUnitIntAssert = (
-		assert_int(policy.evaluate(lineout, PeriodEndPolicy.PeriodState.TIME_UP, 2, 4800.0))
+		assert_int(policy.evaluate(lineout, PeriodEndPolicy.PeriodState.TIME_UP, 1, 4800.0))
 		. is_equal(PeriodEndPolicy.GateResult.SECOND_HALF_UNRESOLVED)
 	)
+	lineout.report_time_game_seconds = 5400.0
+	@warning_ignore("unused_variable")
+	var r4: GdUnitIntAssert = (
+		assert_int(policy.evaluate(lineout, PeriodEndPolicy.PeriodState.TIME_UP, 2, 5400.0))
+		. is_equal(PeriodEndPolicy.GateResult.END_PERIOD)
+	)
+
+
+## Ordinary non-ending reports pass back to the full referee owner without ending time-up.
+func test_nonqualifying_time_up_reports_are_forwarded_to_referee_owner() -> void:
+	var bridge: S3ScoreRefereeBridge = _bridge()
+	@warning_ignore("unused_variable")
+	var clock_observed: bool = bridge.observe_clock(2400.0)
+	var knock_on: RefereeReport = RefereeReport.new()
+	knock_on.reason = RefereeReport.StoppageReason.KNOCK_ON
+	knock_on.decision = RefereeReport.Decision.SCRUM
+	knock_on.offending_team_id = TEAM_A
+	knock_on.position = Vector3(0.0, 0.0, 4.0)
+	@warning_ignore("unused_variable")
+	var r1: GdUnitIntAssert = assert_int(bridge.process_report(knock_on)).is_equal(
+		S3ScoreRefereeBridge.ResultCode.PASSTHROUGH
+	)
+	var forward_pass: RefereeReport = RefereeReport.new()
+	forward_pass.reason = RefereeReport.StoppageReason.FORWARD_PASS
+	forward_pass.decision = RefereeReport.Decision.SCRUM
+	forward_pass.offending_team_id = TEAM_A
+	@warning_ignore("unused_variable")
+	var forward_pass_result: GdUnitIntAssert = (
+		assert_int(bridge.process_report(forward_pass))
+		. is_equal(S3ScoreRefereeBridge.ResultCode.PASSTHROUGH)
+	)
+	var penalty: RefereeReport = RefereeReport.new()
+	penalty.reason = RefereeReport.StoppageReason.OFFSIDE
+	penalty.decision = RefereeReport.Decision.PENALTY
+	penalty.offending_team_id = TEAM_B
+	@warning_ignore("unused_variable")
+	var r2: GdUnitIntAssert = assert_int(bridge.process_report(penalty)).is_equal(
+		S3ScoreRefereeBridge.ResultCode.PASSTHROUGH
+	)
+	@warning_ignore("unused_variable")
+	var r3: GdUnitIntAssert = assert_int(bridge.period_state).is_equal(
+		PeriodEndPolicy.PeriodState.TIME_UP
+	)
+	@warning_ignore("unused_variable")
+	var r4: GdUnitAssert = assert_that(bridge.last_restart).is_null()
 
 
 ## Production remains unavailable while the match, physical-event and place-kick owners are absent.
