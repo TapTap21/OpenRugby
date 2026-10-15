@@ -57,6 +57,20 @@ func test_b03_later_short_hop_enters_capped_rolling_segment() -> void:
 	var r4: GdUnitBoolAssert = assert_bool(is_equal_approx(long_step.velocity_m_s.x, 0.0)).is_true()
 	@warning_ignore("unused_variable")
 	var r5: GdUnitFloatAssert = assert_float(long_step.velocity_m_s.y).is_equal(0.0)
+	@warning_ignore("unused_variable")
+	var r6: GdUnitBoolAssert = assert_bool(is_equal_approx(long_step.position_m.y, 0.1)).is_true()
+
+
+## A state already marked rolling ignores any residual vertical speed before integration.
+func test_b03_existing_rolling_state_keeps_vertical_position_fixed() -> void:
+	var params: BallPhysicsParams = BallPhysicsParams.new()
+	var initial: BallPredictionState = _state(Vector3(0.0, 0.1, 0.0), Vector3(1.0, 4.0, 0.0))
+	initial.rolling = true
+	var result: BallPredictionState = BallPathPredictor.advance(initial, 0.5, params)
+	@warning_ignore("unused_variable")
+	var r1: GdUnitBoolAssert = assert_bool(is_equal_approx(result.position_m.y, 0.1)).is_true()
+	@warning_ignore("unused_variable")
+	var r2: GdUnitFloatAssert = assert_float(result.velocity_m_s.y).is_equal(0.0)
 
 
 ## A non-finite contact time terminates prediction without ballistic extrapolation.

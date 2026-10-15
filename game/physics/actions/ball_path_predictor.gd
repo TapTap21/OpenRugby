@@ -82,6 +82,7 @@ static func _advance_ballistic(
 static func _advance_roll(
 	state: BallPredictionState, duration: float, params: BallPhysicsParams
 ) -> void:
+	state.velocity_m_s.y = 0.0
 	var acceleration: Vector3 = Vector3(
 		-state.velocity_m_s.x * params.predictor_roll_acceleration,
 		0.0,
@@ -89,4 +90,3 @@ static func _advance_roll(
 	)
 	state.position_m += state.velocity_m_s * duration + 0.5 * acceleration * duration * duration
 	state.velocity_m_s += acceleration * duration
-	state.velocity_m_s.y = 0.0
