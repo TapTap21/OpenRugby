@@ -152,15 +152,32 @@ q_b = \tfrac{1}{16384}\left(Q_b(i) + \alpha\,(Q_b(i{+}1) - Q_b(i))\right)$$
 | 3, 4, 5 | Root trajectory point x, y, z in clip space, absolute per frame. y equals the hips height | 1/32 unit (engine: `v << 11` / 65536) | ev_85c76f1d.. |
 | 6, 7, 8 | Clip **target point** x, y, z. Constant within every shipped clip; y is always 0 | 1/32 unit | OD:70b5ce |
 
-* **Root motion.** The world position of a clip-driven player is the trajectory point (channels 3
-  and 5) plus the in-place pose.
-* Data check: with the trajectory added, the mean slide of planted feet drops from 3.8 to 0.8
-  units per frame over 150 moai clips. Adding the heading rotation as well makes the slide worse,
-  so the pose is already in clip space (observed).
-* `motion_TargetDistanceBearing` computes the XZ distance and the bearing from the root position
-  at time t to the target point, minus the heading. Its use is not traced. It is probably the
-  alignment point that selects a clip to reach a ball or contact point (inferred). For example,
-  the catch clip CA3024 has its target about 300 units ahead (about 6 m).
+* **Root trajectory.** Channels 3–5 store an absolute per-frame trajectory point in clip space.
+  The accessor `motion_ClipRootPosition` (0x70b430) samples it (ev_85c76f1d…). The separate
+  pose sampler `motion_SampleClipPose` (0x70c2b0) writes sampled per-bone pose records
+  (ev_06b21373…). The offline pose check adds the root trajectory to the rendered pose: mean
+  planted-foot slide falls from 3.8 to 0.8 model units per frame over 150 moai clips. Adding the
+  heading rotation as well makes the slide worse. This validates the offline pose reconstruction;
+  it does not by itself establish how the match runtime updates an actor's world position.
+* **Runtime use observed so far.** The resolved direct caller of `motion_ClipRootPosition` is
+  `motion_GetClipRootPosition3` (0x7098d0; ev_06f7411f…, ev_b73a708a…). The two resolved callers
+  are target-distance/bearing helpers. `motion_TargetDistanceBearingBetweenClips` (0x712f90)
+  samples two root positions, computes their XZ distance and bearing, then subtracts heading
+  (ev_b5a3750f…). This confirms a target/alignment calculation but not world-position integration.
+  `phys_ActorUpdate` (0x723f30) snapshots a separate position accessor and calls its animation
+  state update at 0x70ef50 (ev_0ad25531…, ev_4a806b08…); direct callers of that update are limited
+  to 0x723f30 (ev_edd3b286…). The remaining transform and animation-mode callbacks include
+  indirect dispatch, so this search does not rule out a separate root-delta consumer.
+* **Safe implementation boundary [I].** Keep the absolute sampled clip-root point distinct from
+  authoritative match world position. Never add each absolute sample to world position as though
+  it were a per-frame delta. Until a complete open-play movement callback proves otherwise,
+  translation ownership stays with the match locomotion simulation; any later root-motion adapter
+  must consume an explicitly derived frame delta exactly once. This avoids cumulative double
+  application while leaving the actual Rugby 08 movement ownership open for further RE.
+* `motion_TargetDistanceBearing` computes root-to-target distance and bearing in XZ, minus heading.
+  Its downstream selection use is not fully traced. It is probably alignment logic for a clip that
+  reaches a ball or contact point (inferred). For example, the catch clip CA3024 has its target
+  about 300 model units ahead (about 6 m).
 
 ### 2.5 Frame flags (observed correlation, inferred meaning)
 
@@ -314,22 +331,42 @@ first-index table, triggers, nodes (24 bytes) and object types 1/2/3/6/7/9.
    for CA3024 (169°).
 10. Every clip name referenced by `animlist.bin` exists in moai.viv. Every set-piece bank clip
     reference resolves to its own archive or to moai.viv.
+11. Sampling the same absolute root-trajectory frame twice returns the same clip-local point and
+    does not mutate the actor's authoritative world position.
+12. Repeated sampling over successive frames never cumulatively adds absolute clip-root points to
+    actor world position. If a verified movement adapter consumes root deltas, assert each
+    adjacent-frame delta is applied at most once and independently from the absolute sample.
+13. With animation sampling disabled, the match locomotion system still owns actor world position;
+    enabling pose sampling changes only the sampled pose/root-trajectory output until a verified
+    runtime movement contract adds an adapter.
 
 ## 7. Open questions (REA unknowns)
 
 1. Event code meanings: ball release, catch, kick contact, sounds. Where is the runtime event
    dispatcher? (`unk_20c479e7..`)
-2. What is the target point? How is the heading turned into radians before the sampler's sin/cos?
+2. Which open-play movement path commits actor world-position displacement: explicit speed/direction
+   integration, clip-root deltas, or both? The resolved caller search only shows root sampling in
+   target-distance/bearing helpers; unresolved mode/transform callbacks remain. Open unknown:
+   `unk_2e39043917429d8f0848431850c1fc3336facd4630ede650393396ddf4b98e52` (revision 1).
+   Evidence: `ev_0ad255315a49cede650e413763d3b30a96cd32587637c539dc044efdf4eb665e`,
+   `ev_4a806b083fc8540902038ca72b84a08fc93d87d60af1f535caf5a30a50bf6f06`,
+   `ev_edd3b28671e579d5a9b42dc16050a1f53235ed75166d88f88d9e96d290c760ba`,
+   `ev_06f7411f6433d83014049553fd5556803fc9f250bdd6358bd3f7e9285ffac305`,
+   `ev_b73a708afedc519fe9fcf0b58b40ea20e4bb1fa47687d67b6e0be46865c14853`,
+   `ev_b5a3750fdfd746e1b9bc7c186287b1f034e387d7ca122cca7bb3a6c2ac05ec10`,
+   `ev_06b21373b553127a72cc8df1447ff5f1271c0d1d79d24abc41d50ad3122ad95f`.
+   Resume detail: `.omc/research/motion/actor-displacement-RESUME.md`.
+3. What is the target point? How is the heading turned into radians before the sampler's sin/cos?
    The data show 1024 units per turn, but the code passes the value to the CRT `sin` after
    dividing by 1024. (`unk_dd309cd8..`)
-3. Header u16 at 0x12 (5), u32 at 0x18, the +2 tick length, and the 0.958 scale of `AAAAAA`.
+4. Header u16 at 0x12 (5), u32 at 0x18, the +2 tick length, and the 0.958 scale of `AAAAAA`.
    (`unk_93c8b480..`)
-4. Not decoded:
+5. Not decoded:
    * `!eagl` EAGL animation banks (`motion/eaglanim.big`, `EAGLAnim::FnAnimBank`);
    * `4bff1461...bin` (`04 00 04 01`; probably `motion/script.bin`, the ScriptLibrary);
    * `577964d6`/`eb487717` offset tables;
    * sequence-bank fields: trigger b/c, node floats, clip entry a3, camera key fields.
-5. Facial animation (`FacialAnim`, the hand/face pose keys) and the blend between sequences (the
+6. Facial animation (`FacialAnim`, the hand/face pose keys) and the blend between sequences (the
    `BlendTime` string, MG floats) are not traced.
 
 ## 8. Confidence summary
@@ -339,7 +376,8 @@ first-index table, triggers, nodes (24 bytes) and object types 1/2/3/6/7/9.
 | Clip container, header, bit widths, delta bitstream, record addressing | high (code and full-corpus decode) |
 | Scales (1/32, Q14), 15 Hz, 1/60 s ticks, linear interpolation | high (code). Rate also corroborated by ballistic flight. |
 | Bone mapping to `!skel.o` 0-25, quaternion conjugation | high (data and renders) |
-| Root trajectory channels 3-5, heading channel 1 | high for layout and units. Medium for how the engine composes root motion with heading. |
+| Root trajectory channels 3-5, heading channel 1 | high for layout and units. Offline pose reconstruction is verified; runtime world-position integration remains unknown. |
+| Open-play actor displacement ownership | unknown; actor update snapshots a separate position and animation state, but mode/transform callbacks remain indirect. |
 | Foot-plant flags | medium (statistical) |
 | Target point meaning | low |
 | Mirroring | high for the remap table and sign flips; not tested in a render |
