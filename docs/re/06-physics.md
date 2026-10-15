@@ -655,6 +655,18 @@ checkpoint evidence (ev_c9586e6e).
   * Heading (in turns; wrapped to [−0.5, 0.5] by 0x6be4b0) approaches the
     desired heading through a PID-style controller (0x722790). The I term is
     smoothed as (4·I + e)/5. The gains are object fields (values unknown).
+    A targeted Ghidra function analysis of 0x722790 makes the update order
+    explicit [I]: first wrap `e = desired_heading - heading`; update the stored
+    integral as `wrap((4 × I + e) / 5)`; compute
+    `wrap(e - previous_error)`; store `e` as the next previous error; then
+    form `g0 × e + g1 × integral + g2 × derivative`, clamp it to
+    `[-max_step, +max_step]`, and wrap the result. The three controller weights
+    and the caller's `max_step` are not resolved to Classic numeric values by
+    this analysis, so this evidence does not authorize fabricated defaults.
+    Evidence `ev_95b2987caa44b1eac62d404b92f0b9e5c5b86a5a2c62142f0a5a2f45fde7fb61`
+    (`analyze_function(0x722790)`, same repaired PE and Ghidra profile) covers
+    the controller body; the numeric values still need separate data/use-site
+    evidence.
   * The heading step is clamped to ±ticks × k_turn, where k_turn = 0.02
     turn/tick (= 360°/s) when speed > 4 m/s, otherwise 1.0, which is
     effectively unlimited (0x7247a0).
