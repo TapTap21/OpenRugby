@@ -53,6 +53,11 @@ func detect_contacts(position_m: Vector3, orientation: Quaternion) -> Array[Ball
 	return contacts
 
 
+## This source owns ground-plane contacts but supplies no stadium mesh contacts.
+func provides_ground_plane_contacts() -> bool:
+	return true
+
+
 ## True for this plane provider only.
 ## A stadium mesh source is still required for full collision data.
 func is_available() -> bool:
