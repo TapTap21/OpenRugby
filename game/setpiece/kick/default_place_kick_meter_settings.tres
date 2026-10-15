@@ -1,0 +1,12 @@
+[gd_resource type="Resource" script_class="PlaceKickMeterSettings" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://game/setpiece/kick/place_kick_meter_settings.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+min_acceleration_by_difficulty = PackedFloat32Array(0.5, 0.8, 1.0)
+max_acceleration_by_difficulty = PackedFloat32Array(1.3, 2.0, 2.4)
+training_speed_multiplier = 0.75
+accuracy_zone_top = PackedFloat32Array(0.343, 0.311, 0.286, 0.262, 0.25)
+accuracy_zone_center = PackedFloat32Array(0.23, 0.23, 0.23, 0.23, 0.23)
+accuracy_zone_bottom = PackedFloat32Array(0.125, 0.159, 0.182, 0.197, 0.21)
