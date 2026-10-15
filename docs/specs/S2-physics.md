@@ -130,6 +130,76 @@ consume one quantized input frame and seeded RNG only during their registered ti
 simulation results. Ball collision geometry is passed as deterministic data; do not query a physics
 server from `MatchSim`.
 
+### Runtime port transaction and output bridge
+
+`S2RuntimePortOwner` is the transaction/checkpoint authority for queued commands, accepted
+consumption, canonical result storage, next sequence, failure metadata, and the staged output suffix.
+It is registered once as an S1 owner adapter and returns no duplicate output records. The output
+producers are `LocomotionSystem`, `BallPhysicsSystem`, and `S2InteractionSystem`; each successful
+checked tick returns only the newly completed successful `S2RuntimeResult` suffix, in completion
+order. S1 concatenates those producer arrays in registration order and preserves each local order.
+
+Before any consumer runs, successful `capture_tick(context)` binds the candidate frame tick on the
+port and initializes that candidate's staged result suffix as empty. Each successful
+`complete_command` appends its sealed result to the staged suffix. After all systems finish,
+PREPARED validation can inspect the exact successful `S2RuntimeResult` suffix for that tick using
+the typed API:
+
+```gdscript
+func take_staged_result_suffix(requested_candidate_tick: int) -> S2StagedResultSuffixResult
+```
+
+Its owner is `S2RuntimePort`. The result constructor field order is `ok: bool`,
+`requested_candidate_tick: int`, `staged_candidate_tick: int`,
+`results: Array[S2RuntimeResult]`, `error: Error`. A successful matching first call returns
+`(true, requested_candidate_tick, exact_active_staged_tick, detached typed results, OK)`; a valid
+empty suffix succeeds with `[]`. A wrong requested tick returns failure with `[]`,
+`ERR_INVALID_PARAMETER`, and the active bound staged tick without consuming availability. A repeat
+after a successful take returns failure with `[]` and `ERR_ALREADY_EXISTS`, retaining consumed state
+for this transaction. With no active matching staged suffix, it returns failure with `[]` and
+`ERR_UNCONFIGURED`; it reports the active bound tick, or `staged_candidate_tick == -1` when there is
+no active bound tick. Result arrays are detached copies, contained result records and nested payloads are sealed immutable records, and
+failure records never expose a partial suffix. A failed wrong-tick take leaves the valid matching
+take available; a successful take remains consumed until rollback or finalization.
+
+Before any consumer runs, `S2RuntimePortOwner.capture_tick(context)` binds the candidate frame tick
+and compares the full ordered immutable command snapshots in `context.commands` with the port's
+canonical queued-command snapshots. Any missing, extra, reordered, or changed snapshot fails before
+consumption. On success, the port freezes exact sequence-to-snapshot/kind/phase membership for that
+candidate. Consumers receive detached command values for their declared phase. A consumed command
+is completed through `complete_command(command, result, consumer_phase)`: it succeeds only in the
+active transaction, for exact canonical membership in the matching phase, and once per sequence.
+The port supplies sequence and kind from its canonical entry rather than trusting producer fields.
+Unknown, changed, wrong-phase, duplicate, or unsuccessful completion fails the tick. Accepted but
+unconsumed commands remain queued unchanged for a later tick; every consumed accepted command has
+exactly one successful result.
+
+At successful completion, copy the result through the existing snapshot/decode validation path,
+then detach and seal the copied result and child payload before the port retains or returns it. A
+copy/decode failure fails the active transaction without consuming or publishing that command.
+Mutation through producer-held result or payload aliases cannot change published output. Typed
+readback records are detached and sealed; returned snapshot dictionaries and arrays are mutable but
+detached. `PassLaunch` remains mutable for unpublished command, filter, and build use; only a
+detached `PassLaunch` nested in a published `S2RuntimeResult` is sealed.
+
+Each producer's returned suffix must match its newly successful completions. During PREPARED
+validation, `S2ReplayCodec.prepare_outputs(prepared_tick)` calls
+`take_staged_result_suffix(prepared_tick.candidate_tick)` and compares the successful exact-tick
+suffix against that same `PreparedTick`'s S1 aggregate by detached value and order before producing
+`PreparedOutputBundle`. A missing, fabricated, duplicated, reordered, or altered aggregate record
+rejects preparation. Replay uses this same exact-tick prepared-output path before source-row
+comparison. No S1 command-bundle accessor is added, and v3 wire fields, layout, and meanings do not
+change.
+
+Keep the port checkpoint until outer S1 finalization. The checkpoint covers the staged suffix and
+one-shot-consumed state as well as queue/result state. Port `commit_tick` may stage queue pruning but
+retains rollback state. Any later output encoding, replay validation, or row preparation failure
+aborts the outer S1 tick and restores the exact pre-tick pending queue, results, consumed state, next
+sequence, and failure metadata, while discarding the aborted candidate's staged suffix and consumed
+marker. Finalization retires that checkpoint without a fallible port commit. An explicit retry
+restarts the same candidate from restored pre-tick state, stages a fresh suffix, and makes exactly
+one successful take available again; no failed or aborted tick publishes output.
+
 ## 3. Ordered S2 tick and event contract
 
 One S1 match tick is exactly 1/60 s. Its registration order and S2 internal phases are fixed:
@@ -313,6 +383,46 @@ assets. For every randomized case, use injected `SimRng` state and assert strict
 boundaries. S1 replay/determinism architecture also applies: identical config, mod set, seed and
 input frames must hash identically after every tick, and a modded run with no effective S2 changes
 must exercise the same S2 systems.
+
+### Runtime port transaction and publication
+
+- **R-01 Producer aggregation:** have each output-producing registered system return multiple
+  records, including a producer with no new completions. Assert the S1 aggregate preserves system
+  registration order and each producer's local completion order; `S2RuntimePortOwner` contributes
+  no records.
+- **R-02 Canonical command binding:** make `context.commands` differ from canonical queued snapshots
+  by omission, addition, reordering, and a changed payload. Each capture fails before any command
+  is consumed. For accepted commands, assert consumer values are detached and sequence/snapshot/kind/
+  phase membership remains the exact frozen canonical membership.
+- **R-03 Completion membership and cardinality:** reject unknown commands, changed snapshots,
+  wrong-phase completion, duplicate completion for one sequence, and unsuccessful completion.
+  Assert sequence and kind in accepted results come from the canonical port entry. Accepted
+  unconsumed commands remain unchanged in queue order; every consumed accepted command has exactly
+  one successful result.
+- **R-04 Exact aggregate suffix:** call
+  `take_staged_result_suffix(prepared_tick.candidate_tick)` and accept the successful matching
+  result only when the prepared S1 aggregate equals its detached values in exact order. Assert a
+  wrong-tick call fails with `ERR_INVALID_PARAMETER`, empty results, and the active bound tick, then
+  succeeds when retried with the matching tick. After a successful matching take, assert a repeated
+  call fails with `ERR_ALREADY_EXISTS` and empty results. Reject fabricated, omitted, duplicate,
+  reordered, or altered aggregate records. Failure records expose no partial suffix.
+- **R-05 Publication sealing and readback:** mutate producer-held result and nested payload aliases
+  after successful completion and assert retained/returned published output is unchanged. Assert
+  readback records are detached and sealed while returned snapshot dictionaries/arrays can be
+  mutated without changing port state. Keep an unpublished `PassLaunch` mutable and assert only its
+  detached nested published copy is sealed.
+- **R-06 Failure, rollback, and retry:** inject copy/decode failure at completion and a later
+  owner/system/flow/output-encoding/replay-validation/row-preparation failure after a successful
+  suffix take. Assert no failed result is consumed or published. Only outer S1 abort restores the
+  exact pre-tick port state: pending queue, results, consumed state, next sequence, and failure
+  metadata, with no active candidate suffix or consumed marker. Retry the same candidate from that
+  restored state; it recreates the candidate suffix and makes one take available. Assert the first
+  matching take succeeds, the second fails with `ERR_ALREADY_EXISTS`, and exactly one result set is
+  published. Confirm outer finalization only retires the retained checkpoint and requires no
+  fallible port commit.
+- **R-07 Interaction order:** enqueue actions in an order different from the canonical processing
+  order and assert resolution is by player id, then action sequence, including same-player sequence
+  ties. Enqueue order must not change the order.
 
 ### Ball / predictor / kick
 

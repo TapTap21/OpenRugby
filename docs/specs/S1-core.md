@@ -169,9 +169,13 @@ no-argument signature once for each mutable entry in the effective ordered `SimS
 there is no overload or runtime method-arity dispatch. Ordinary live `build(request)` retains the
 supplied objects.
 
-`SystemTickResult` is a constructible value record: `ok: bool`, `error: Error`. Success is
-`ok = true, error = OK`; failure is `ok = false, error != OK`. A successful system tick has no
-separate value payload. A fake participant can return either shape directly.
+`SystemTickResult` is a constructible value record: `ok: bool`, `error: Error`,
+`outputs: Array[RefCounted]`. `outputs` is a detached typed-record container of existing
+feature-owned immutable records; S1 introduces no universal output schema. Construction copies the
+array, and returned array getters are detached. Record values and nested mutable payloads are
+detached and sealed before publication. Success is `ok = true, error = OK` and may carry an empty
+or non-empty output array; failure is `ok = false, error != OK, outputs = []`. A fake participant
+can return either shape directly.
 
 `SimTickOwner extends SimSystem` is an opt-in owner participant in the same ordered system
 registry. It captures from an immutable generic `SimTickContext`, copied from candidate input and
@@ -390,6 +394,14 @@ canonical_port_readback: CanonicalPortReadback) -> ReplayValidationResult`. The 
 is issued by its `InputLog`; the canonical readback is codec-authored after validating the port's
 full queue. The codec validates source-row fields, carried/new sequence rules, command/output
 linkage, and generated output equality before its authority registers and returns a token.
+For S2, `S2ReplayCodec.prepare_outputs(prepared_tick)` calls
+`S2RuntimePort.take_staged_result_suffix(requested_candidate_tick: int) ->
+S2StagedResultSuffixResult` with the exact candidate tick retained by that `PreparedTick`. It
+requires a successful result bound to that same tick and compares its detached typed
+`Array[S2RuntimeResult]` with the prepared aggregate by detached value and order before producing
+`PreparedOutputBundle`. This verifies producer-to-aggregate linkage without adding an S1
+command-bundle accessor. Replay validates through this same exact-tick prepared-output path before
+source-row comparison. The v3 wire fields, layout, and meanings remain unchanged.
 
 Construction: if `config.validate()` returns errors, the sim is invalid (`is_valid()` false,
 `push_error` once, and a checked tick does not change state). Otherwise:
@@ -414,7 +426,12 @@ opaque prepared-tick handle when applicable. Status is one of `PREPARED`, `COMMI
 `PREPARED` is an abortable successful execution, not a committed tick: it retains the complete
 pre-tick rollback checkpoint, and exposes detached validated typed outputs, the completed generic
 outcome, and staged signals. `outputs` is a detached ordered bundle of existing typed output
-records (for S2, `S2RuntimeResult` values); no new wire or command schema is introduced.
+records (`Array[RefCounted]`; for S2, existing `S2RuntimeResult` values); no new wire or command
+schema is introduced. Successful registered systems' outputs are concatenated in stable
+registration order, preserving each system's local order. Failed systems contribute no outputs; any
+later failure, abort, retryable/fatal failure, or no-op exposes an empty array. Prepared results
+retain the aggregate through coordinated finalization; committed results carry the same immutable
+record values. The result getter returns a detached array and may share immutable record references.
 For live recording, `COMMITTED` is assigned only after the runner has finalized the sim and
 committed the complete prepared log row. Replay uses its already complete, read-only source row and
 marks the tick committed only after output validation and sim finalization. `NO_OP_INVALID` has
@@ -462,8 +479,9 @@ validation and replay finalization.
 `tick_checked(frame, commands)` copies and normalizes the candidate frame (using the wrong-shape
 all-zero fallback) and seals a detached immutable copy of the typed command bundle before any
 mutation. Its opaque `PreparedTick` retains those exact immutable candidate values and exposes
-read-only copied frame access plus candidate provenance; no getter permits mutation of the retained
-values. It then runs all fallible simulation phases without finalizing. On success it returns
+read-only copied frame access and `candidate_tick: int` (the 1-based tick being evaluated); no
+getter permits mutation of the retained values. It then runs all fallible simulation phases without
+finalizing. On success it returns
 `PREPARED`, bound to this sim and exact candidate; the rollback checkpoint remains live.
 `finalize_prepared_tick(prepared_tick, append_token)` is
 infallible, allocation-free, and performs no callbacks for the already-verified live authorization;
@@ -1323,11 +1341,15 @@ names even in comments.
   once in stable registry order before the first system tick. Systems retain existing registration
   order and observe captured pre-update owner values
   throughout the tick. Owner commits run in stable registry order after flow staging and receive
-  the completed generic outcome. Invalid, finished, and stopped no-op ticks capture no owners.
+  the completed generic outcome. Successful systems' outputs concatenate in registration order,
+  preserving producer-local order; the S2 port owner contributes no outputs. Invalid, finished,
+  and stopped no-op ticks capture no owners and expose no outputs.
 - C-46 Injected failures during owner capture, system tick, checked flow staging, and owner commit restore
   the complete pre-tick state: tick count, current/previous input edges, RNG, clock/flow, triggers,
   every system, owner and owned stateful provider, S2 port pending commands/results/sequence, and
-  staged events. Successful rollback returns
+  staged events. A failure after an earlier producer completion exposes no aggregate output and
+  restores the exact port output suffix; explicit retry publishes each successful completion once.
+  Successful rollback returns
   `FAILED_RETRYABLE`; no failed phase returns a signal batch, appends a log entry, or publishes a
   sim, runner, or EventBus signal. Non-restorable stateful participants/providers and unsupported
   capabilities are rejected before tick 1. Flow failure is injected by enabling the documented
@@ -1338,10 +1360,18 @@ names even in comments.
   automatically. A successful retry matches a clean run and publishes each event once.
 - C-48 The runner encodes/validates commands before tick execution. A command encoding failure
   does not tick or mutate sim state. After a `PREPARED` tick, it encodes/validates outputs and
-  prepares/reserves the complete frame/commands/outputs row while rollback remains possible. An
+  prepares/reserves the complete frame/commands/outputs row while rollback remains possible. For
+  S2, assert `take_staged_result_suffix(prepared_tick.candidate_tick)` returns
+  `(true, requested_tick, exact_active_staged_tick, detached typed results, OK)` and the codec
+  compares those results by detached value and order with that exact prepared tick's aggregate.
+  Before the matching successful take, a wrong requested tick returns `ERR_INVALID_PARAMETER`,
+  empty results, and the active bound staged tick without consuming availability; repeating a
+  successful take returns `ERR_ALREADY_EXISTS`, empty results, and keeps the take consumed for the
+  transaction. Neither failed attempt exposes a partial suffix or publishes a row. An
   output/full-row preparation failure aborts/restores the tick, retains the exact sampled candidate,
   does not publish or expose a row, and explicit retry repeats preparation without polling or
-  re-enqueueing. On success, sim finalization and row commit occur infallibly,
+  re-enqueueing. The retry creates a fresh candidate transaction and makes its staged suffix
+  available for one successful take. On success, sim finalization and row commit occur infallibly,
   allocation-free and with no callbacks between, before staged MatchSim signals/EventBus relays and
   `ticked` last. Invalid/stale tokens or candidate substitution cannot change the log.
 - C-49 `fill_frame() == false` returns terminal `SOURCE_EXHAUSTED`, stops, emits `input_ended`,
@@ -1411,7 +1441,10 @@ names even in comments.
   aborts flow staging. Successful rollback restores the full pre-tick state and returns
   `FAILED_RETRYABLE` with no outcome/batch, log append or publication; retrying after disabling
   the condition commits the exact candidate once.
-- C-59 Fake participants can construct successful and failing `SystemTickResult`,
+- C-59 Fake participants can construct successful `SystemTickResult` values with empty and
+  non-empty `Array[RefCounted]` outputs and failing values with empty outputs. Constructors and
+  returned array getters detach the array; published records are immutable. Fake participants can
+  also construct successful and failing
   `OwnerCaptureResult` (success includes a non-null immutable `OwnerCapture.payload`),
   `OwnerCommitResult`, and `CheckpointResult`; successful `CheckpointResult` carries a non-empty
   checkpoint value for stateful participants. Fake owners can construct `SimDependencyCheckpoint`
@@ -1496,7 +1529,12 @@ names even in comments.
   token paired with another tick, an independently created output bundle, or a reused/cancelled
   token. A matching prepared tick/output bundle/row token commits successfully before relay. A
   malformed record, missing command/output linkage, duplicate/reordered sequence, or generated-output
-  mismatch rejects replay before that tick is finalized or published. Verify port pending/results/
+  mismatch rejects replay before that tick is finalized or published. On the same exact-tick
+  prepared-output path, `S2ReplayCodec.prepare_outputs(prepared_tick)` must successfully take
+  `S2RuntimePort.take_staged_result_suffix(prepared_tick.candidate_tick) ->
+  S2StagedResultSuffixResult`, and the prepared S2 aggregate must equal its detached
+  `Array[S2RuntimeResult]` by value and order; fabricated, duplicate, reordered, or altered
+  aggregate records reject. Verify port pending/results/
   sequence are present in runtime snapshots and hashes; owner/system/output-codec/log-row failure
   restores exact pre-tick port state; and successful live/replay finalization exposes no intermediate
   queue/result/sequence mutation before the full row commits; committed readback and hashes match
@@ -1531,14 +1569,16 @@ names even in comments.
   canonical order. Preparation and retry failures preserve
   those exact commands/sequences without a second enqueue or new sequence assignment. Replay applies
   the full-queue carried/new rule in §3.3/§3.4, preserves recorded sequence values, validates full
-  canonical readback, and compares generated outputs against commands in the full row. No second S1
-  command schema is introduced.
+  canonical readback, and compares generated outputs against commands in the full row. Producer
+  outputs concatenate in registration order with producer-local completion order preserved; the
+  port owner adds no duplicate records. No second S1 command schema is introduced.
 - C-72 With tick N leaving command sequence 0 unconsumed, row N+1 repeats that exact command
   unchanged and introduces sequence 1. Replay preserves command 0 once (does not enqueue it twice),
   injects only sequence 1, and accepts its later output when command 0 is consumed. Reject a carried
   command that is missing, changed in any payload field, duplicated, or reordered against canonical
-  port order. Verify port pending readback equals each complete row and the post-commit survivors
-  seed the following comparison.
+  port order. Preserve the carried command's canonical sequence and kind; the port, not the
+  producer, supplies those result fields. Verify port pending readback equals each complete row and
+  the post-commit survivors seed the following comparison.
 - C-73 Exercise append authorization: mutate the caller's original frame after tick preparation
   and attempt to pair another candidate's frame with the prepared tick; the committed row must use
   the immutable `PreparedTick` frame and `prepare_append` exposes no frame argument. Reject a

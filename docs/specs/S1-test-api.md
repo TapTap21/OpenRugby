@@ -19,7 +19,7 @@ properties; they must not infer a different constructor from implementation code
 | `ParticipantClaim` | `game/match/participant_claim.gd` | `stable_participant_id: String`, `participant_version: String`, `configuration_fingerprint: String`, `deterministic_initial_state_fingerprint: String` |
 | `ProviderClaim` | `game/match/provider_claim.gd` | `provider: RefCounted`, `stable_provider_id: String`, `provider_version: String`, `transaction_capability: TransactionCapability`, `configuration_fingerprint: String`, `deterministic_initial_state_fingerprint: String` |
 | `ReplayInstanceResult` | `game/match/replay_instance_result.gd` | `ok: bool`, `instance: SimSystem | null`, `error: Error`, `owned_provider_claims: Array[ProviderClaim]` |
-| `SystemTickResult` | `game/match/system_tick_result.gd` | `ok: bool`, `error: Error` |
+| `SystemTickResult` | `game/match/system_tick_result.gd` | `ok: bool`, `error: Error`, `outputs: Array[RefCounted]` |
 | `OwnerCapture` | `game/match/owner_capture.gd` | `payload: Variant` |
 | `OwnerCaptureResult` | `game/match/owner_capture_result.gd` | `ok: bool`, `capture: OwnerCapture | null`, `error: Error` |
 | `OwnerCommitResult` | `game/match/owner_commit_result.gd` | `ok: bool`, `error: Error` |
@@ -28,7 +28,7 @@ properties; they must not infer a different constructor from implementation code
 | `ReplaySourceRow` | `game/match/replay_source_row.gd` | `frame: InputFrame | null`, `command_records: Array[Dictionary]`, `output_records: Array[Dictionary]`; public `_init()` is no-argument and creates an inert, unregistered row |
 | `SimTickContext` | `game/match/sim_tick_context.gd` | See context accessors below; constructed by the sim for an owner callback, not directly by callers. |
 | `SimTickOutcome` | `game/match/sim_tick_outcome.gd` | See outcome accessors below; constructed by the sim after successful staging, not directly by callers. |
-| `TickResult` | `game/match/tick_result.gd` | `status: TickResult.Status`, `error: Error`, `outcome: SimTickOutcome | null`, `outputs: Array`, `signal_batch: SignalBatch`, `prepared_tick: PreparedTick | null` |
+| `TickResult` | `game/match/tick_result.gd` | `status: TickResult.Status`, `error: Error`, `outcome: SimTickOutcome | null`, `outputs: Array[RefCounted]`, `signal_batch: SignalBatch`, `prepared_tick: PreparedTick | null` |
 | `MatchReadinessBlocker` | `game/match/match_readiness_blocker.gd` | `code: MatchReadinessBlocker.Code`, `subject: StringName`, `message: String` |
 | `MatchReadinessReport` | `game/match/match_readiness_report.gd` | `blockers: Array[MatchReadinessBlocker]`; also `is_ready() -> bool` |
 | `MatchBuildResult` | `game/match/match_build_result.gd` | `ok: bool`, `sim: MatchSim | null`, `codec: S2ReplayCodec | null`, `setup_fingerprint: String`, `readiness: MatchReadinessReport`, `error: Error` |
@@ -44,13 +44,21 @@ locatable. `PreparedTick`, `SignalBatch`, `InputFrame`,
 ## Construction and value semantics
 
 Fake participants construct the listed result/claim/capture/checkpoint records. `TickResult` is
-constructed by `MatchSim` and is inspected by tests; tests do not fabricate one. `SimTickContext`
+constructed by `MatchSim` and is inspected by tests; tests do not fabricate one. MatchSim stores
+its detached output array, and the returned `TickResult.outputs` getter is detached. `SimTickContext`
 and `SimTickOutcome` are constructed by the sim and are not directly caller-constructible.
 For `Array[ProviderClaim]`, the constructor takes a typed array in the stated position and stores a
 detached array copy. `SetupResult` success is `(true, OK, declared capability, non-null valid
 ParticipantClaim, claims)`; failure is `(false, non-OK, UNSUPPORTED, null, [])`. `ReplayInstanceResult`
 success is `(true, fresh instance, OK, claims)` and failure is `(false, null, non-OK, [])`.
-`SystemTickResult` success/failure is `(true, OK)` / `(false, non-OK)`. `OwnerCaptureResult` is
+`SystemTickResult` success/failure is `(true, OK, outputs)` / `(false, non-OK, [])`; success may
+carry an empty or non-empty `Array[RefCounted]` of existing feature-owned typed records. S1 does
+not define a universal output record schema. Its constructor and returned `outputs` getter detach
+the array. `TickResult.outputs` is also `Array[RefCounted]`; MatchSim stores a detached array and
+the returned getter is detached. Published output records and nested mutable payloads are detached and sealed, so
+these arrays may share immutable record references. Successful systems' outputs concatenate in
+registration order, preserving producer-local order; failures, aborts, failed ticks, and no-op
+results expose empty outputs. `OwnerCaptureResult` is
 `(true, non-null capture, OK)` / `(false, null, non-OK)`. `OwnerCommitResult` is `(true, OK)` /
 `(false, non-OK)`. `CheckpointResult` is `(true, non-empty immutable value, OK)` for a transactional
 participant and `(false, null, non-OK)` for failure; only an explicitly stateless participant may
@@ -230,5 +238,26 @@ checkpoint capture or port transaction, with no sim or port state change.
 The S2-owned contract must separately specify concrete typed `S2RuntimePort` and
 `S2RuntimePortOwner` methods/claims/checkpoint state; `S2ReplayCodec` concrete record types,
 validation and fallible preparation results; `S2ProviderBindings` fields; and
-`S2ReplayInstanceResult`. S1 does not add a generic port protocol, generic command/output schema,
-or public checkpoint-payload fields to make a fake convenient.
+`S2ReplayInstanceResult`. For the bounded output bridge, `S2RuntimePort` exposes
+`take_staged_result_suffix(requested_candidate_tick: int) -> S2StagedResultSuffixResult`, called by
+`S2ReplayCodec.prepare_outputs(prepared_tick)` with that exact `PreparedTick` candidate tick during
+PREPARED validation. The S2-owned `S2StagedResultSuffixResult` constructor fields, in order, are
+`ok: bool`, `requested_candidate_tick: int`, `staged_candidate_tick: int`,
+`results: Array[S2RuntimeResult]`, and `error: Error`. Success is
+`(true, requested_tick, exact_active_staged_tick, detached typed results, OK)`; an empty suffix is
+a valid success. Wrong tick fails with empty results and `ERR_INVALID_PARAMETER`, reports the
+active bound staged tick, and preserves availability. A repeated successful take fails with empty
+results and `ERR_ALREADY_EXISTS`, retaining consumed state for that transaction. With no active
+matching staged suffix, failure has empty results, non-OK `ERR_UNCONFIGURED`, and staged tick `-1`
+when no active bound tick exists. All arrays are detached copies; result records and nested payloads
+are sealed immutable records, and failure results never expose a partial suffix. S2 also exposes
+`capture_tick(context)`, which binds the candidate tick and initializes an empty staged suffix.
+Successful `complete_command(command, result, consumer_phase)` calls append sealed results to that
+suffix. S2 binds the full immutable ordered `context.commands` snapshot to canonical
+queued-command snapshots before consumption, freezes sequence/snapshot/kind/phase membership, and
+accepts each successful completion once in its matching phase. LocomotionSystem, BallPhysicsSystem,
+and S2InteractionSystem return only their newly completed successful result suffixes in completion
+order; the owner captures, checkpoints, and restores state and returns no outputs. The S2 codec
+compares the registered-system aggregate to the exact staged port suffix by detached value and
+order. S1 does not add a generic port protocol, generic command/output schema, or public
+checkpoint-payload fields to make a fake convenient.
