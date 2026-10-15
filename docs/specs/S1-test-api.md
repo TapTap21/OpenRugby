@@ -32,6 +32,7 @@ properties; they must not infer a different constructor from implementation code
 | `MatchReadinessBlocker` | `game/match/match_readiness_blocker.gd` | `code: MatchReadinessBlocker.Code`, `subject: StringName`, `message: String` |
 | `MatchReadinessReport` | `game/match/match_readiness_report.gd` | `blockers: Array[MatchReadinessBlocker]`; also `is_ready() -> bool` |
 | `MatchBuildResult` | `game/match/match_build_result.gd` | `ok: bool`, `sim: MatchSim | null`, `codec: S2ReplayCodec | null`, `setup_fingerprint: String`, `readiness: MatchReadinessReport`, `error: Error` |
+| `MatchReplayResult` | `game/match/match_replay_result.gd` | `sim: MatchSim | null`, `error: Error`, `replay_failure: MatchReplayResult.ReplayFailure`, `fatal_reason: StringName`, `readiness_evaluation: MatchReplayResult.ReadinessEvaluation`, `readiness: MatchReadinessReport` |
 | `PreparedAppendToken` | `game/match/prepared_append_token.gd` | Opaque token; public no-argument constructor, no inspectable fields |
 | `ReplayValidationToken` | `game/match/replay_validation_token.gd` | Opaque token; public no-argument constructor, no inspectable fields |
 
@@ -175,7 +176,7 @@ text and is not identity or fingerprint input. `MatchReadinessReport` at
 `game/match/match_readiness_report.gd` has an immutable copied
 `blockers: Array[MatchReadinessBlocker]`, constructed by
 `_init(p_blockers: Array[MatchReadinessBlocker] = [])`, and `is_ready() -> bool`, true exactly when
-the list is empty. It is the one public report type for build blockers and replay readiness.
+the list is empty. It is the one public report type for build blockers and evaluated replay readiness.
 
 `MatchBuildResult` at `game/match/match_build_result.gd` is a positional immutable record with
 constructor `_init(p_ok: bool, p_sim: MatchSim | null, p_codec: S2ReplayCodec | null,
@@ -186,6 +187,24 @@ returns a non-null readiness report. Success is `(true, sim, codec, non-empty fi
 report, OK)`; failure is `(false, null, null, empty fingerprint, report with blockers, non-OK)`.
 The codec is the single composition-provided codec described by S1-core. Readiness diagnostics do
 not substitute for `error`, and diagnostic message text is not fingerprinted.
+
+`MatchReplayResult` at `game/match/match_replay_result.gd` is a positional immutable record with
+constructor `_init(p_sim: MatchSim | null, p_error: Error,
+p_replay_failure: MatchReplayResult.ReplayFailure, p_fatal_reason: StringName,
+p_readiness_evaluation: MatchReplayResult.ReadinessEvaluation,
+p_readiness: MatchReadinessReport)`. `ReplayFailure` contains `NONE`, `INVALID_RECORD`,
+`INVALID_LINKAGE`, `INCOMPATIBLE_HEADER`, `PORT_RESET_FAILED`, `TICK_FAILED`, `OUTPUT_MISMATCH`,
+and `FATAL_ROLLBACK`. `ReadinessEvaluation` contains `NOT_EVALUATED`, `PREFLIGHT_ONLY`, and
+`BUILDER_COMPLETE`. Every result has a non-null readiness report. `NOT_EVALUATED` means null
+log/header or a typed non-v3 header stopped replay before setup; its report is an empty placeholder.
+`PREFLIGHT_ONLY` means null-request handling or dependency-shareability checks returned before the
+full replay composition build; its report may hold known blockers but is incomplete.
+`BUILDER_COMPLETE` means the full replay composition builder returned; its report is complete and
+retained on later success or failure. Callers must not infer full readiness from `is_ready()` unless
+the state is `BUILDER_COMPLETE`. Success is `(sim, OK, NONE, &"", BUILDER_COMPLETE, ready report)`;
+a failure after composition evaluation has `sim == null`, non-OK error, the applicable failure and
+reason, `BUILDER_COMPLETE`, and the evaluated builder report. A fatal rollback has
+`replay_failure == FATAL_ROLLBACK` and non-empty `fatal_reason`.
 
 `ReplayValidationToken` and `PreparedAppendToken` remain opaque single-use capabilities with no
 public nonce/field access and no caller-visible mint operation. Each exposes an ordinary public
