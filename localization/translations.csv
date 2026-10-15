@@ -19,3 +19,11 @@ INPUT_ACTION_UI_LEFT,Menu left
 INPUT_ACTION_UI_RIGHT,Menu right
 DIFFICULTY_PLACEHOLDER,Normal
 CAMERA_PRESET_PLACEHOLDER,Broadcast
+PROTOTYPE_STATUS_TITLE,Provisional sandbox — not Classic gameplay
+PROTOTYPE_STATUS_DETAIL,Placeholder movement and ball behavior; sandbox behavior only.
+PROTOTYPE_CONTROLS,Arrows move   Space sprints   S kicks
+PROTOTYPE_SCORE,Tries: {score}
+PROTOTYPE_BALL_CARRIED,You carry the ball.
+PROTOTYPE_OPPONENT_CARRIES,Opponent carries the ball.
+PROTOTYPE_BALL_LOOSE,Ball is loose.
+PROTOTYPE_TRY_SCORED,Provisional try scored. Positions reset.
