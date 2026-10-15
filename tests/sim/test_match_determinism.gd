@@ -1,8 +1,7 @@
 class_name TestMatchDeterminism
 extends GdUnitTestSuite
-## Determinism tests: identical config, mod set and input log give identical state hashes, and
-## a recorded input log replays to the same final hash (ADR-004, S1-core sections 2.5 and 3.3;
-## criteria C-24 to C-27).
+## Determinism coverage for identical runs and seed changes (C-24/C-25), plus temporary
+## fail-closed replay-boundary checks while the S2 codec is absent (not C-26/C-27 acceptance).
 
 const TICK_COUNT: int = 600
 const SLOT_COUNT: int = 2
@@ -40,7 +39,7 @@ func _config(seed_value: int) -> MatchConfig:
 	config.seed = seed_value
 	config.slot_count = SLOT_COUNT
 	config.axes_per_slot = AXES_PER_SLOT
-	config.period_real_seconds = 1
+	config.period_real_seconds = TICK_COUNT + 1
 	return config
 
 
@@ -70,9 +69,17 @@ func _scripted_frames() -> Array[InputFrame]:
 func _run(config: MatchConfig, frames: Array[InputFrame], hashes: Array[String]) -> MatchSim:
 	var sim: MatchSim = MatchSim.new(config)
 	for system: SimSystem in _systems():
-		sim.add_system(system)
+		var add_system_error: Error = sim.add_system(system)
+		@warning_ignore("unused_variable")
+		var add_system_assert: GdUnitIntAssert = assert_int(add_system_error).is_equal(OK)
 	for frame: InputFrame in frames:
-		sim.tick(frame)
+		var tick_result: TickResult = sim.tick(frame)
+		@warning_ignore("unused_variable")
+		var tick_status_assert: GdUnitIntAssert = assert_int(tick_result.status).is_equal(
+			TickResult.Status.COMMITTED
+		)
+		@warning_ignore("unused_variable")
+		var tick_error_assert: GdUnitIntAssert = assert_int(tick_result.error).is_equal(OK)
 		@warning_ignore("return_value_discarded")
 		hashes.append(sim.state_hash())
 	return sim
@@ -113,15 +120,24 @@ func _run_one_tick(
 ) -> MatchSim:
 	var sim: MatchSim = MatchSim.new(config)
 	for system: SimSystem in _systems():
-		sim.add_system(system)
-	sim.tick(frames[0])
+		var add_system_error: Error = sim.add_system(system)
+		@warning_ignore("unused_variable")
+		var add_system_assert: GdUnitIntAssert = assert_int(add_system_error).is_equal(OK)
+	var tick_result: TickResult = sim.tick(frames[0])
+	@warning_ignore("unused_variable")
+	var tick_status_assert: GdUnitIntAssert = assert_int(tick_result.status).is_equal(
+		TickResult.Status.COMMITTED
+	)
+	@warning_ignore("unused_variable")
+	var tick_error_assert: GdUnitIntAssert = assert_int(tick_result.error).is_equal(OK)
 	@warning_ignore("return_value_discarded")
 	hashes.append(sim.state_hash())
 	return sim
 
 
-## C-26: manual rows serialize, while production replay stays unavailable.
-func test_c26_recorded_log_replays_to_same_hash() -> void:
+## Temporary fail-closed boundary check, not C-26 acceptance coverage: fixture rows round-trip,
+## while replay stays unavailable until the S2 codec is implemented.
+func test_temporary_replay_is_fail_closed_without_s2_codec() -> void:
 	var frames: Array[InputFrame] = _scripted_frames()
 	var header: ReplayHeader = ReplayHeader.new()
 	header.game_version = "0.1.0"
@@ -144,8 +160,9 @@ func test_c26_recorded_log_replays_to_same_hash() -> void:
 	var r2: GdUnitObjectAssert = assert_object(replay).is_null()
 
 
-## C-27: MatchReplay.run returns null when the mod set hash differs from the header's.
-func test_c27_replay_refuses_different_mod_set() -> void:
+## Temporary fail-closed boundary check, not C-27 acceptance coverage: replay stays unavailable
+## while the S2 codec is absent, including for a mismatched mod-set hash.
+func test_temporary_replay_is_fail_closed_with_mod_set_mismatch() -> void:
 	var frames: Array[InputFrame] = _scripted_frames()
 	var header: ReplayHeader = ReplayHeader.new()
 	header.seed = SIM_SEED

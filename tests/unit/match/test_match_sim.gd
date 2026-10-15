@@ -18,9 +18,19 @@ func _frame() -> InputFrame:
 	return InputFrame.new(1, 2)
 
 
+func _consume_tick(sim: MatchSim, frame: InputFrame) -> void:
+	@warning_ignore("unused_variable")
+	var tick_result: TickResult = sim.tick(frame)
+
+
+func _consume_system_registration(sim: MatchSim, system: SimSystem) -> void:
+	@warning_ignore("unused_variable")
+	var registration_error: Error = sim.add_system(system)
+
+
 func _tick_n(sim: MatchSim, count: int) -> void:
 	for i: int in range(count):
-		sim.tick(_frame())
+		_consume_tick(sim, _frame())
 
 
 func _state(sim: MatchSim) -> String:
@@ -30,30 +40,30 @@ func _state(sim: MatchSim) -> String:
 ## C-12: timeline of the default flow with 60-tick periods.
 func test_c12_default_timeline_with_short_periods() -> void:
 	var sim: MatchSim = MatchSim.new(_short_config())
-	sim.tick(_frame())
+	_consume_tick(sim, _frame())
 	@warning_ignore("unused_variable")
 	var r1: GdUnitStringAssert = assert_str(_state(sim)).is_equal("kick_off")
-	sim.tick(_frame())
+	_consume_tick(sim, _frame())
 	@warning_ignore("unused_variable")
 	var r2: GdUnitStringAssert = assert_str(_state(sim)).is_equal("in_play")
 	_tick_n(sim, 59)
 	@warning_ignore("unused_variable")
 	var r3: GdUnitStringAssert = assert_str(_state(sim)).is_equal("in_play")
-	sim.tick(_frame())
+	_consume_tick(sim, _frame())
 	@warning_ignore("unused_variable")
 	var r4: GdUnitStringAssert = assert_str(_state(sim)).is_equal("half_time")
-	sim.tick(_frame())
+	_consume_tick(sim, _frame())
 	@warning_ignore("unused_variable")
 	var r5: GdUnitStringAssert = assert_str(_state(sim)).is_equal("kick_off")
 	@warning_ignore("unused_variable")
 	var r6: GdUnitIntAssert = assert_int(sim.clock.period).is_equal(2)
-	sim.tick(_frame())
+	_consume_tick(sim, _frame())
 	_tick_n(sim, 59)
 	@warning_ignore("unused_variable")
 	var r7: GdUnitStringAssert = assert_str(_state(sim)).is_equal("in_play")
 	@warning_ignore("unused_variable")
 	var r8: GdUnitBoolAssert = assert_bool(sim.is_finished()).is_false()
-	sim.tick(_frame())
+	_consume_tick(sim, _frame())
 	@warning_ignore("unused_variable")
 	var r9: GdUnitStringAssert = assert_str(_state(sim)).is_equal("full_time")
 	@warning_ignore("unused_variable")
@@ -118,11 +128,11 @@ func test_c15_whistle_and_resume_triggers() -> void:
 	@warning_ignore("unused_variable")
 	var r1: GdUnitStringAssert = assert_str(_state(sim)).is_equal("in_play")
 	sim.raise_trigger(MatchTriggers.WHISTLE_BLOWN)
-	sim.tick(_frame())
+	_consume_tick(sim, _frame())
 	@warning_ignore("unused_variable")
 	var r2: GdUnitStringAssert = assert_str(_state(sim)).is_equal("stoppage")
 	sim.raise_trigger(MatchTriggers.PLAY_RESUMED)
-	sim.tick(_frame())
+	_consume_tick(sim, _frame())
 	@warning_ignore("unused_variable")
 	var r3: GdUnitStringAssert = assert_str(_state(sim)).is_equal("in_play")
 
@@ -132,8 +142,8 @@ func test_c16_unmatched_trigger_is_consumed() -> void:
 	var sim: MatchSim = MatchSim.new(_short_config())
 	_tick_n(sim, 2)
 	sim.raise_trigger(MatchTriggers.PLAY_RESUMED)
-	sim.tick(_frame())
-	sim.tick(_frame())
+	_consume_tick(sim, _frame())
+	_consume_tick(sim, _frame())
 	@warning_ignore("unused_variable")
 	var r1: GdUnitStringAssert = assert_str(_state(sim)).is_equal("in_play")
 
@@ -157,14 +167,14 @@ class ElapsedProbe:
 func test_c17_clock_runs_only_in_play_and_stoppage() -> void:
 	var sim: MatchSim = MatchSim.new(_short_config())
 	var probe: ElapsedProbe = ElapsedProbe.new()
-	sim.add_system(probe)
+	_consume_system_registration(sim, probe)
 	var deltas: Array[int] = []
 	for step: int in range(7):
 		if step == 4:
 			sim.raise_trigger(MatchTriggers.WHISTLE_BLOWN)
 		if step == 6:
 			sim.raise_trigger(MatchTriggers.PLAY_RESUMED)
-		sim.tick(_frame())
+		_consume_tick(sim, _frame())
 		@warning_ignore("return_value_discarded")
 		deltas.append(sim.clock.elapsed_ticks - probe.seen[step])
 	@warning_ignore("unused_variable")
@@ -248,11 +258,11 @@ func test_duplicate_hinted_identity_is_rejected_before_second_setup() -> void:
 ## C-18: a system that raises WHISTLE_BLOWN in in_play moves the flow on the same tick.
 func test_c18_system_trigger_applies_same_tick() -> void:
 	var sim: MatchSim = MatchSim.new(_short_config())
-	sim.add_system(WhistleSystem.new())
+	_consume_system_registration(sim, WhistleSystem.new())
 	_tick_n(sim, 2)
 	@warning_ignore("unused_variable")
 	var r1: GdUnitStringAssert = assert_str(_state(sim)).is_equal("in_play")
-	sim.tick(_frame())
+	_consume_tick(sim, _frame())
 	@warning_ignore("unused_variable")
 	var r2: GdUnitStringAssert = assert_str(_state(sim)).is_equal("stoppage")
 
@@ -261,12 +271,12 @@ func test_c18_system_trigger_applies_same_tick() -> void:
 func test_c19_systems_tick_in_registration_order() -> void:
 	var sim: MatchSim = MatchSim.new(_short_config())
 	var log: Array[StringName] = []
-	sim.add_system(RecordSystem.new(&"first", log))
-	sim.add_system(RecordSystem.new(&"second", log))
-	sim.tick(_frame())
+	_consume_system_registration(sim, RecordSystem.new(&"first", log))
+	_consume_system_registration(sim, RecordSystem.new(&"second", log))
+	_consume_tick(sim, _frame())
 	@warning_ignore("unused_variable")
 	var r1: GdUnitArrayAssert = assert_array(log).is_equal([&"first", &"second"])
-	sim.tick(_frame())
+	_consume_tick(sim, _frame())
 	@warning_ignore("unused_variable")
 	var r2: GdUnitArrayAssert = assert_array(log).is_equal(
 		[&"first", &"second", &"first", &"second"]
@@ -276,10 +286,10 @@ func test_c19_systems_tick_in_registration_order() -> void:
 ## C-20: add_system after the first tick is ignored and the system never ticks.
 func test_c20_add_system_after_first_tick_is_ignored() -> void:
 	var sim: MatchSim = MatchSim.new(_short_config())
-	sim.tick(_frame())
+	_consume_tick(sim, _frame())
 	var log: Array[StringName] = []
-	sim.add_system(RecordSystem.new(&"late", log))
-	sim.tick(_frame())
+	_consume_system_registration(sim, RecordSystem.new(&"late", log))
+	_consume_tick(sim, _frame())
 	@warning_ignore("unused_variable")
 	var r1: GdUnitArrayAssert = assert_array(log).is_empty()
 
@@ -293,7 +303,7 @@ func test_c21_just_pressed_and_just_released_edges() -> void:
 		var frame: InputFrame = _frame()
 		if tick_number >= 2 and tick_number <= 4:
 			frame.set_held(0, 3, true)
-		sim.tick(frame)
+		_consume_tick(sim, frame)
 		@warning_ignore("return_value_discarded")
 		pressed.append(sim.just_pressed(0, 3))
 		@warning_ignore("return_value_discarded")
@@ -311,7 +321,7 @@ func test_c22_invalid_config_makes_tick_no_op() -> void:
 	var sim: MatchSim = MatchSim.new(config)
 	@warning_ignore("unused_variable")
 	var r1: GdUnitBoolAssert = assert_bool(sim.is_valid()).is_false()
-	sim.tick(_frame())
+	_consume_tick(sim, _frame())
 	@warning_ignore("unused_variable")
 	var r2: GdUnitIntAssert = assert_int(sim.tick_count).is_equal(0)
 
@@ -320,7 +330,7 @@ func test_c22_invalid_config_makes_tick_no_op() -> void:
 func test_c23_state_hash_format_and_change() -> void:
 	var sim: MatchSim = MatchSim.new(_short_config())
 	var before: String = sim.state_hash()
-	sim.tick(_frame())
+	_consume_tick(sim, _frame())
 	var after: String = sim.state_hash()
 	var hex_regex: RegEx = RegEx.new()
 	@warning_ignore("unused_variable")

@@ -21,7 +21,7 @@ var error: Error:
 var outcome: SimTickOutcome:
 	get:
 		return _outcome
-var outputs: Array:
+var outputs: Array[RefCounted]:
 	get:
 		return SystemTickResult._copy_records(_outputs)
 var signal_batch: SignalBatch:
@@ -34,7 +34,7 @@ var prepared_tick: PreparedTick:
 var _status: Status
 var _error: Error
 var _outcome: SimTickOutcome
-var _outputs: Array
+var _outputs: Array[RefCounted]
 var _signal_batch: SignalBatch
 var _prepared_tick: PreparedTick
 
@@ -43,19 +43,13 @@ func _init(
 	p_status: Status,
 	p_error: Error,
 	p_outcome: SimTickOutcome = null,
-	p_outputs: Array = [],
+	p_outputs: Array[RefCounted] = [],
 	p_signal_batch: SignalBatch = null,
 	p_prepared_tick: PreparedTick = null
 ) -> void:
 	_status = p_status
 	_error = p_error
 	_outcome = p_outcome
-	var typed_outputs: Array[RefCounted] = []
-	for output: Variant in p_outputs:
-		if not output is RefCounted:
-			typed_outputs.clear()
-			break
-		typed_outputs.append(output as RefCounted)
-	_outputs = SystemTickResult._copy_records(typed_outputs)
+	_outputs = SystemTickResult._copy_records(p_outputs)
 	_signal_batch = p_signal_batch if p_signal_batch != null else SignalBatch.new()
 	_prepared_tick = p_prepared_tick

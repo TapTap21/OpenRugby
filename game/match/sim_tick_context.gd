@@ -5,7 +5,6 @@ extends RefCounted
 # gdlint: disable=class-definitions-order,function-arguments-number
 
 var _candidate_tick: int
-var _candidate_attempt_id: int
 var _candidate_frame: InputFrame
 var _previous_frame: InputFrame
 var _pressed_buttons: PackedInt64Array
@@ -39,11 +38,9 @@ func _init(
 	p_pre_flow_ticks_in_state: int,
 	p_pre_pending_triggers: Array[StringName],
 	p_clock_delta_numerator: int,
-	p_clock_delta_denominator: int,
-	p_candidate_attempt_id: int
+	p_clock_delta_denominator: int
 ) -> void:
 	_candidate_tick = p_candidate_tick
-	_candidate_attempt_id = p_candidate_attempt_id
 	_candidate_frame = _copy_frame(p_candidate_frame)
 	_previous_frame = _copy_frame(p_previous_frame)
 	_pressed_buttons = p_pressed_buttons.duplicate()
@@ -64,9 +61,6 @@ func _init(
 var candidate_tick: int:
 	get:
 		return _candidate_tick
-var candidate_attempt_id: int:
-	get:
-		return _candidate_attempt_id
 var candidate_frame: InputFrame:
 	get:
 		return _copy_frame(_candidate_frame)

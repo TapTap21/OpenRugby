@@ -56,25 +56,34 @@ static func from_bytes(bytes: PackedByteArray) -> InputLog:
 	log._axes = axes
 	log._frame_count = frames
 	var runtime_rows: Variant = d.get("runtime", [])
-	if typeof(runtime_rows) != TYPE_ARRAY:
+	if not runtime_rows is Array:
 		return null
-	if not runtime_rows.is_empty() and runtime_rows.size() != frames:
+	var runtime_array: Array = runtime_rows
+	if not runtime_array.is_empty() and runtime_array.size() != frames:
 		return null
 	for index: int in range(frames):
 		var runtime_row: Dictionary = {
 			"commands": [], "outputs": [], "_identity": ReplayRowIdentity.new()
 		}
-		if not runtime_rows.is_empty():
-			var raw_row: Variant = runtime_rows[index]
-			if typeof(raw_row) != TYPE_DICTIONARY:
+		if not runtime_array.is_empty():
+			var raw_row_value: Variant = runtime_array[index]
+			if not raw_row_value is Dictionary:
 				return null
+			var raw_row: Dictionary = raw_row_value
 			var raw_commands: Variant = raw_row.get("commands", [])
 			var raw_outputs: Variant = raw_row.get("outputs", [])
-			if not _valid_record_array(raw_commands) or not _valid_record_array(raw_outputs):
+			if (
+				not raw_commands is Array
+				or not raw_outputs is Array
+				or not _valid_record_array(raw_commands)
+				or not _valid_record_array(raw_outputs)
+			):
 				return null
+			var command_values: Array = raw_commands
+			var output_values: Array = raw_outputs
 			runtime_row = {
-				"commands": _copy_untyped_records(raw_commands),
-				"outputs": _copy_untyped_records(raw_outputs),
+				"commands": _copy_untyped_records(command_values),
+				"outputs": _copy_untyped_records(output_values),
 				"_identity": ReplayRowIdentity.new()
 			}
 		log._runtime_rows.append(runtime_row)
@@ -113,6 +122,92 @@ func append_fixture_row(
 	return OK
 
 
+## Reserves an empty command/output row for one exact commandless prepared live tick.
+## This narrow S1 path does not encode typed command or output records.
+func prepare_empty_live_append(prepared_tick: PreparedTick) -> AppendPrepareResult:
+	if (
+		prepared_tick == null
+		or not prepared_tick._sim is MatchSim
+		or not prepared_tick._sim._runner_owned
+		or not prepared_tick._sim._is_active_handle(prepared_tick)
+		or prepared_tick._outcome == null
+		or prepared_tick._commands == null
+		or not prepared_tick._commands.is_valid()
+		or prepared_tick._commands.size() != 0
+		or not prepared_tick._outputs.is_empty()
+		or _reservation.size() > 0
+		or header == null
+		or not _valid_frame(prepared_tick._candidate_frame)
+		or prepared_tick._outcome.candidate_tick != _frame_count + 1
+		or prepared_tick._candidate_frame.tick != _frame_count
+		or _buttons.size() != _frame_count * header.slot_count
+		or _axes.size() != _frame_count * header.slot_count * header.axes_per_slot
+		or _runtime_rows.size() != _frame_count
+		or _row_generations.size() != _frame_count
+	):
+		return AppendPrepareResult.failed(ERR_INVALID_PARAMETER)
+	var frame: InputFrame = SimTickContext._copy_frame(prepared_tick._candidate_frame)
+	var storage_identity: ReplayRowIdentity = ReplayRowIdentity.new()
+	var row: Dictionary = {"commands": [], "outputs": [], "_identity": storage_identity}
+	var row_snapshot: Dictionary = {"commands": [], "outputs": []}
+	var token: PreparedAppendToken = PreparedAppendToken.new()
+	var index: int = _frame_count
+	var generation: int = _next_generation
+	var button_size_before: int = _buttons.size()
+	var axis_size_before: int = _axes.size()
+	var before: Dictionary = {
+		"frame_count": _frame_count,
+		"button_size": button_size_before,
+		"axis_size": axis_size_before,
+		"row_size": _runtime_rows.size(),
+		"generation_size": _row_generations.size(),
+	}
+	# Prepare all replacement storage first; the existing log stays untouched on allocation failure.
+	var next_buttons: PackedInt64Array = _buttons.duplicate()
+	var button_resize_error: Error = next_buttons.resize(next_buttons.size() + header.slot_count)
+	if button_resize_error != OK:
+		return AppendPrepareResult.failed(button_resize_error)
+	var next_axes: PackedInt32Array = _axes.duplicate()
+	var axis_resize_error: Error = next_axes.resize(
+		next_axes.size() + header.slot_count * header.axes_per_slot
+	)
+	if axis_resize_error != OK:
+		return AppendPrepareResult.failed(axis_resize_error)
+	for slot: int in range(header.slot_count):
+		next_buttons[index * header.slot_count + slot] = frame.buttons[slot]
+	for axis_index: int in range(header.slot_count * header.axes_per_slot):
+		next_axes[index * header.slot_count * header.axes_per_slot + axis_index] = (
+			frame.axes[axis_index]
+		)
+	var next_rows: Array[Dictionary] = _runtime_rows.duplicate()
+	var next_generations: Array[int] = _row_generations.duplicate()
+	next_rows.append(row)
+	next_generations.append(generation)
+	_buttons = next_buttons
+	_axes = next_axes
+	_runtime_rows = next_rows
+	_row_generations = next_generations
+	_next_generation += 1
+	_reservation = {
+		"token": token,
+		"sim": prepared_tick._sim,
+		"prepared_tick": prepared_tick,
+		"source_bundle": prepared_tick._commands,
+		"output_identity": prepared_tick._outputs,
+		"index": index,
+		"generation": generation,
+		"row": row,
+		"row_snapshot": row_snapshot,
+		"frame": frame,
+		"storage_identity": storage_identity,
+		"before": before,
+		"active": true,
+		"sealed": false,
+		"finalized_by": null,
+	}
+	return AppendPrepareResult.prepared(token)
+
+
 ## Publishes the already sealed row after exact sim finalization.
 func commit_append(token: PreparedAppendToken) -> Error:
 	if (
@@ -138,11 +233,47 @@ func cancel_append(token: PreparedAppendToken) -> Error:
 	if _reservation.finalized_by != null:
 		return ERR_ALREADY_IN_USE
 	var before: Dictionary = _reservation.before
-	_buttons.resize(before.button_size)
-	_axes.resize(before.axis_size)
-	_runtime_rows.resize(before.row_size)
-	_row_generations.resize(before.generation_size)
-	_frame_count = before.frame_count
+	var button_size_value: Variant = before.get("button_size")
+	var axis_size_value: Variant = before.get("axis_size")
+	var row_size_value: Variant = before.get("row_size")
+	var generation_size_value: Variant = before.get("generation_size")
+	var frame_count_value: Variant = before.get("frame_count")
+	if (
+		not button_size_value is int
+		or not axis_size_value is int
+		or not row_size_value is int
+		or not generation_size_value is int
+		or not frame_count_value is int
+	):
+		return ERR_INVALID_DATA
+	var button_size: int = button_size_value
+	var axis_size: int = axis_size_value
+	var row_size: int = row_size_value
+	var generation_size: int = generation_size_value
+	var frame_count_before: int = frame_count_value
+	if (
+		button_size < 0
+		or button_size > _buttons.size()
+		or axis_size < 0
+		or axis_size > _axes.size()
+		or row_size < 0
+		or row_size > _runtime_rows.size()
+		or generation_size < 0
+		or generation_size > _row_generations.size()
+		or frame_count_before < 0
+		or frame_count_before > _frame_count
+	):
+		return ERR_INVALID_DATA
+	var button_resize_error: Error = _buttons.resize(button_size)
+	if button_resize_error == OK:
+		button_resize_error = _axes.resize(axis_size)
+	if button_resize_error == OK:
+		button_resize_error = _runtime_rows.resize(row_size)
+	if button_resize_error == OK:
+		button_resize_error = _row_generations.resize(generation_size)
+	if button_resize_error != OK:
+		return button_resize_error
+	_frame_count = frame_count_before
 	_reservation.active = false
 	_reservation.clear()
 	return OK
@@ -174,7 +305,11 @@ func frame_commands(index: int) -> Array[Dictionary]:
 	var row: Dictionary = _published_row(index)
 	if row.is_empty():
 		return []
-	return _copy_records(row.get("commands", []))
+	var command_values: Variant = row.get("commands", [])
+	if not command_values is Array or not _valid_record_array(command_values):
+		return []
+	var commands: Array = command_values
+	return _copy_untyped_records(commands)
 
 
 ## Returns detached output records for a current published row, or an empty array when invalid.
@@ -182,7 +317,11 @@ func frame_outputs(index: int) -> Array[Dictionary]:
 	var row: Dictionary = _published_row(index)
 	if row.is_empty():
 		return []
-	return _copy_records(row.get("outputs", []))
+	var output_values: Variant = row.get("outputs", [])
+	if not output_values is Array or not _valid_record_array(output_values):
+		return []
+	var outputs: Array = output_values
+	return _copy_untyped_records(outputs)
 
 
 ## Returns an immutable detached row snapshot with this log's row identity.
@@ -196,22 +335,25 @@ func read_replay_row(index: int) -> ReplaySourceRowResult:
 		return ReplaySourceRowResult.new(false, null, ERR_INVALID_DATA)
 	var row: ReplaySourceRow = ReplaySourceRow.new()
 	var runtime_row: Dictionary = _runtime_rows[index]
-	row._issue(
-		self,
-		index,
-		frame,
-		runtime_row.get("commands", []),
-		runtime_row.get("outputs", []),
-		_row_generations[index],
-		runtime_row._identity
-	)
+	var command_values: Variant = runtime_row.get("commands", [])
+	var output_values: Variant = runtime_row.get("outputs", [])
+	var identity_value: Variant = runtime_row.get("_identity")
+	if (
+		not command_values is Array
+		or not output_values is Array
+		or not _valid_record_array(command_values)
+		or not _valid_record_array(output_values)
+		or not identity_value is ReplayRowIdentity
+	):
+		return ReplaySourceRowResult.new(false, null, ERR_INVALID_DATA)
+	var command_values_array: Array = command_values
+	var output_values_array: Array = output_values
+	var commands: Array[Dictionary] = _copy_untyped_records(command_values_array)
+	var outputs: Array[Dictionary] = _copy_untyped_records(output_values_array)
+	var identity: ReplayRowIdentity = identity_value
+	row._issue(self, index, frame, commands, outputs, _row_generations[index], identity)
 	_issued_replay_rows.append(
-		{
-			"row": row,
-			"index": index,
-			"generation": _row_generations[index],
-			"identity": runtime_row._identity
-		}
+		{"row": row, "index": index, "generation": _row_generations[index], "identity": identity}
 	)
 	return ReplaySourceRowResult.new(true, row, OK)
 
@@ -255,9 +397,10 @@ func _copy_records(records: Array[Dictionary]) -> Array[Dictionary]:
 static func _copy_untyped_records(records: Array) -> Array[Dictionary]:
 	var result: Array[Dictionary] = []
 	for record: Variant in records:
-		if not _supports_row_value(record):
+		if not record is Dictionary or not _supports_row_value(record):
 			return []
-		result.append((record as Dictionary).duplicate(true))
+		var record_dictionary: Dictionary = record
+		result.append(record_dictionary.duplicate(true))
 	return result
 
 
@@ -327,8 +470,7 @@ func _finalize_registered_append(
 		or entry.prepared_tick != tick
 		or tick._sim != sim
 		or not tick._active
-		or entry.source_bundle != tick._commands
-		or entry.output_identity != tick._outputs
+		or not _reserved_empty_tick_is_intact(entry)
 		or not entry.sealed
 	):
 		return false
@@ -339,30 +481,78 @@ func _finalize_registered_append(
 func _invalidate_registered_append(token: PreparedAppendToken, tick: PreparedTick) -> void:
 	var entry: Dictionary = _registered_entry(token)
 	if not entry.is_empty() and entry.prepared_tick == tick and entry.finalized_by == null:
-		cancel_append(token)
+		var cancel_error: Error = cancel_append(token)
+		if cancel_error != OK:
+			push_error(
+				"InputLog: failed to cancel registered append: %s" % error_string(cancel_error)
+			)
 
 
 func _invalidate_for_tick(tick: PreparedTick) -> void:
 	if _reservation.size() > 0 and _reservation.prepared_tick == tick:
 		if _reservation.finalized_by == null:
-			cancel_append(_reservation.token)
+			var token_value: Variant = _reservation.get("token")
+			if token_value is PreparedAppendToken:
+				var token: PreparedAppendToken = token_value
+				var cancel_error: Error = cancel_append(token)
+				if cancel_error != OK:
+					push_error(
+						(
+							"InputLog: failed to invalidate append reservation: %s"
+							% error_string(cancel_error)
+						)
+					)
 
 
 func _reservation_row_is_intact(entry: Dictionary) -> bool:
+	var index_value: Variant = entry.get("index")
+	var before_value: Variant = entry.get("before")
+	var generation_value: Variant = entry.get("generation")
+	var row_value: Variant = entry.get("row")
+	var row_snapshot_value: Variant = entry.get("row_snapshot")
+	var frame_value: Variant = entry.get("frame")
+	var storage_identity_value: Variant = entry.get("storage_identity")
+	if (
+		not index_value is int
+		or not before_value is Dictionary
+		or not generation_value is int
+		or not row_value is Dictionary
+		or not row_snapshot_value is Dictionary
+		or not frame_value is InputFrame
+		or not storage_identity_value is ReplayRowIdentity
+	):
+		return false
+	var index: int = index_value
+	var before: Dictionary = before_value
+	var generation: int = generation_value
+	var row: Dictionary = row_value
+	var row_snapshot: Dictionary = row_snapshot_value
+	var frame: InputFrame = frame_value
+	var storage_identity: ReplayRowIdentity = storage_identity_value
+	var frame_count_value: Variant = before.get("frame_count")
+	var button_size_value: Variant = before.get("button_size")
+	var axis_size_value: Variant = before.get("axis_size")
+	if not frame_count_value is int or not button_size_value is int or not axis_size_value is int:
+		return false
+	var frame_count_before: int = frame_count_value
+	var button_size_before: int = button_size_value
+	var axis_size_before: int = axis_size_value
+	if index < 0 or index >= _row_generations.size() or index >= _runtime_rows.size():
+		return false
+	var runtime_row: Dictionary = _runtime_rows[index]
+	var runtime_identity: Variant = runtime_row.get("_identity")
 	return (
-		entry.index == entry.before.frame_count
-		and entry.index < _row_generations.size()
-		and entry.index < _runtime_rows.size()
-		and _buttons.size() == entry.before.button_size + header.slot_count
-		and _axes.size() == entry.before.axis_size + header.slot_count * header.axes_per_slot
-		and entry.generation == _row_generations[entry.index]
-		and _exact_value_equal(_copy_row(entry.row), entry.row_snapshot)
-		and _exact_value_equal(_copy_row(_runtime_rows[entry.index]), entry.row_snapshot)
-		and entry.storage_identity == _runtime_rows[entry.index]._identity
-		and entry.frame.buttons == _buttons.slice(entry.index * header.slot_count, _buttons.size())
+		index == frame_count_before
+		and _buttons.size() == button_size_before + header.slot_count
+		and _axes.size() == axis_size_before + header.slot_count * header.axes_per_slot
+		and generation == _row_generations[index]
+		and _exact_value_equal(_copy_row(row), row_snapshot)
+		and _exact_value_equal(_copy_row(runtime_row), row_snapshot)
+		and storage_identity == runtime_identity
+		and frame.buttons == _buttons.slice(index * header.slot_count, _buttons.size())
 		and (
-			entry.frame.axes
-			== _axes.slice(entry.index * header.slot_count * header.axes_per_slot, _axes.size())
+			frame.axes
+			== _axes.slice(index * header.slot_count * header.axes_per_slot, _axes.size())
 		)
 	)
 
@@ -388,17 +578,57 @@ func _seal_registered_append(token: PreparedAppendToken) -> bool:
 	var entry: Dictionary = _registered_entry(token)
 	if entry.is_empty() or not entry.active or entry.finalized_by != null:
 		return false
-	if not _reservation_row_is_intact(entry):
+	if not _reserved_empty_tick_is_intact(entry) or not _reservation_row_is_intact(entry):
 		return false
 	entry.sealed = true
 	return true
+
+
+func _reserved_empty_tick_is_intact(entry: Dictionary) -> bool:
+	var sim_value: Variant = entry.get("sim")
+	var tick_value: Variant = entry.get("prepared_tick")
+	var frame_value: Variant = entry.get("frame")
+	var source_bundle_value: Variant = entry.get("source_bundle")
+	var output_identity_value: Variant = entry.get("output_identity")
+	var index_value: Variant = entry.get("index")
+	if (
+		not sim_value is MatchSim
+		or not tick_value is PreparedTick
+		or not frame_value is InputFrame
+		or not source_bundle_value is DetachedCommandBundle
+		or not output_identity_value is Array
+		or not index_value is int
+	):
+		return false
+	var sim: MatchSim = sim_value
+	var tick: PreparedTick = tick_value
+	var frame: InputFrame = frame_value
+	var source_bundle: DetachedCommandBundle = source_bundle_value
+	var output_identity: Array = output_identity_value
+	var index: int = index_value
+	if not tick._candidate_frame is InputFrame or not tick._outcome is SimTickOutcome:
+		return false
+	return (
+		sim._runner_owned
+		and sim._is_active_handle(tick)
+		and is_same(source_bundle, tick._commands)
+		and source_bundle.is_valid()
+		and source_bundle.size() == 0
+		and is_same(output_identity, tick._outputs)
+		and tick._outputs.is_empty()
+		and tick._outcome.candidate_tick == index + 1
+		and tick._candidate_frame.equals(frame)
+		and tick._candidate_frame.tick == index
+	)
 
 
 static func _exact_value_equal(left: Variant, right: Variant) -> bool:
 	if typeof(left) != typeof(right):
 		return false
 	if left is float:
-		return (is_nan(left) and is_nan(right)) or left == right
+		var left_float: float = left
+		var right_float: float = right
+		return (is_nan(left_float) and is_nan(right_float)) or left_float == right_float
 	if left is Vector2 or left is Vector2i:
 		return _exact_value_equal(left.x, right.x) and _exact_value_equal(left.y, right.y)
 	if left is Vector3 or left is Vector3i:
@@ -465,14 +695,20 @@ static func _exact_value_equal(left: Variant, right: Variant) -> bool:
 			and _exact_value_equal(left.a, right.a)
 		)
 	if left is Dictionary:
-		if left.size() != right.size():
+		if not right is Dictionary:
 			return false
-		var left_keys: Array = left.keys()
-		var left_values: Array = left.values()
-		var right_keys: Array = right.keys()
-		var right_values: Array = right.values()
+		var left_dictionary: Dictionary = left
+		var right_dictionary: Dictionary = right
+		if left_dictionary.size() != right_dictionary.size():
+			return false
+		var left_keys: Array = left_dictionary.keys()
+		var left_values: Array = left_dictionary.values()
+		var right_keys: Array = right_dictionary.keys()
+		var right_values: Array = right_dictionary.values()
 		var matched: PackedByteArray = PackedByteArray()
-		matched.resize(right_keys.size())
+		var matched_resize_error: Error = matched.resize(right_keys.size())
+		if matched_resize_error != OK:
+			return false
 		for entry_index: int in range(left_keys.size()):
 			var key: Variant = left_keys[entry_index]
 			var paired_index: int = -1
@@ -488,38 +724,80 @@ static func _exact_value_equal(left: Variant, right: Variant) -> bool:
 			matched[paired_index] = 1
 		return true
 	if left is Array:
-		if left.size() != right.size():
+		if not right is Array:
 			return false
-		for index: int in range(left.size()):
-			if not _exact_value_equal(left[index], right[index]):
+		var left_array: Array = left
+		var right_array: Array = right
+		if left_array.size() != right_array.size():
+			return false
+		for index: int in range(left_array.size()):
+			if not _exact_value_equal(left_array[index], right_array[index]):
 				return false
 		return true
 	if left is PackedFloat32Array:
-		if left.size() != right.size():
+		if not right is PackedFloat32Array:
 			return false
-		for index: int in range(left.size()):
-			if not _exact_value_equal(left[index], right[index]):
+		var left_values: PackedFloat32Array = left
+		var right_values: PackedFloat32Array = right
+		if left_values.size() != right_values.size():
+			return false
+		for index: int in range(left_values.size()):
+			if not _exact_value_equal(left_values[index], right_values[index]):
 				return false
 		return true
 	if left is PackedFloat64Array:
-		if left.size() != right.size():
+		if not right is PackedFloat64Array:
 			return false
-		for index: int in range(left.size()):
-			if not _exact_value_equal(left[index], right[index]):
+		var left_values: PackedFloat64Array = left
+		var right_values: PackedFloat64Array = right
+		if left_values.size() != right_values.size():
+			return false
+		for index: int in range(left_values.size()):
+			if not _exact_value_equal(left_values[index], right_values[index]):
 				return false
 		return true
-	if left is PackedVector2Array or left is PackedVector3Array:
-		if left.size() != right.size():
+	if left is PackedVector2Array:
+		if not right is PackedVector2Array:
 			return false
-		for index: int in range(left.size()):
-			if not _exact_value_equal(left[index], right[index]):
+		var left_values: PackedVector2Array = left
+		var right_values: PackedVector2Array = right
+		if left_values.size() != right_values.size():
+			return false
+		for index: int in range(left_values.size()):
+			if not _exact_value_equal(left_values[index], right_values[index]):
 				return false
 		return true
-	if left is PackedVector4Array or left is PackedColorArray:
-		if left.size() != right.size():
+	if left is PackedVector3Array:
+		if not right is PackedVector3Array:
 			return false
-		for index: int in range(left.size()):
-			if not _exact_value_equal(left[index], right[index]):
+		var left_values: PackedVector3Array = left
+		var right_values: PackedVector3Array = right
+		if left_values.size() != right_values.size():
+			return false
+		for index: int in range(left_values.size()):
+			if not _exact_value_equal(left_values[index], right_values[index]):
+				return false
+		return true
+	if left is PackedVector4Array:
+		if not right is PackedVector4Array:
+			return false
+		var left_values: PackedVector4Array = left
+		var right_values: PackedVector4Array = right
+		if left_values.size() != right_values.size():
+			return false
+		for index: int in range(left_values.size()):
+			if not _exact_value_equal(left_values[index], right_values[index]):
+				return false
+		return true
+	if left is PackedColorArray:
+		if not right is PackedColorArray:
+			return false
+		var left_values: PackedColorArray = left
+		var right_values: PackedColorArray = right
+		if left_values.size() != right_values.size():
+			return false
+		for index: int in range(left_values.size()):
+			if not _exact_value_equal(left_values[index], right_values[index]):
 				return false
 		return true
 	return left == right
@@ -527,19 +805,30 @@ static func _exact_value_equal(left: Variant, right: Variant) -> bool:
 
 static func _contains_nan(value: Variant) -> bool:
 	if value is float:
-		return is_nan(value)
+		var scalar: float = value
+		return is_nan(scalar)
 	if value is Vector2:
-		return is_nan(value.x) or is_nan(value.y)
+		var vector2_x: float = value.x
+		var vector2_y: float = value.y
+		return is_nan(vector2_x) or is_nan(vector2_y)
 	if value is Vector3:
-		return is_nan(value.x) or is_nan(value.y) or is_nan(value.z)
+		var vector3_x: float = value.x
+		var vector3_y: float = value.y
+		var vector3_z: float = value.z
+		return is_nan(vector3_x) or is_nan(vector3_y) or is_nan(vector3_z)
 	if value is Vector4 or value is Quaternion:
-		return is_nan(value.x) or is_nan(value.y) or is_nan(value.z) or is_nan(value.w)
+		var vector4_x: float = value.x
+		var vector4_y: float = value.y
+		var vector4_z: float = value.z
+		var vector4_w: float = value.w
+		return is_nan(vector4_x) or is_nan(vector4_y) or is_nan(vector4_z) or is_nan(vector4_w)
 	if value is Rect2:
 		return _contains_nan(value.position) or _contains_nan(value.size)
 	if value is Transform2D:
 		return _contains_nan(value.x) or _contains_nan(value.y) or _contains_nan(value.origin)
 	if value is Plane:
-		return _contains_nan(value.normal) or is_nan(value.d)
+		var plane_d: float = value.d
+		return _contains_nan(value.normal) or is_nan(plane_d)
 	if value is AABB:
 		return _contains_nan(value.position) or _contains_nan(value.size)
 	if value is Basis:
@@ -554,7 +843,11 @@ static func _contains_nan(value: Variant) -> bool:
 			or _contains_nan(value.w)
 		)
 	if value is Color:
-		return is_nan(value.r) or is_nan(value.g) or is_nan(value.b) or is_nan(value.a)
+		var color_r: float = value.r
+		var color_g: float = value.g
+		var color_b: float = value.b
+		var color_a: float = value.a
+		return is_nan(color_r) or is_nan(color_g) or is_nan(color_b) or is_nan(color_a)
 	if value is PackedFloat32Array or value is PackedFloat64Array:
 		for item: float in value:
 			if is_nan(item):
@@ -579,17 +872,39 @@ static func _contains_nan(value: Variant) -> bool:
 
 
 func _copy_row(row: Dictionary) -> Dictionary:
+	var command_values: Variant = row.get("commands", [])
+	var output_values: Variant = row.get("outputs", [])
+	if (
+		not command_values is Array
+		or not output_values is Array
+		or not _valid_record_array(command_values)
+		or not _valid_record_array(output_values)
+	):
+		return {}
+	var command_array: Array = command_values
+	var output_array: Array = output_values
 	return {
-		"commands": _copy_records(row.get("commands", [])),
-		"outputs": _copy_records(row.get("outputs", []))
+		"commands": _copy_untyped_records(command_array),
+		"outputs": _copy_untyped_records(output_array)
 	}
 
 
 func _copy_runtime_rows(rows: Array) -> Array:
 	var result: Array = []
 	for row: Dictionary in rows:
-		var commands: Array[Dictionary] = _copy_untyped_records(row.get("commands", []))
-		var outputs: Array[Dictionary] = _copy_untyped_records(row.get("outputs", []))
+		var command_values: Variant = row.get("commands", [])
+		var output_values: Variant = row.get("outputs", [])
+		if (
+			not command_values is Array
+			or not output_values is Array
+			or not _valid_record_array(command_values)
+			or not _valid_record_array(output_values)
+		):
+			return []
+		var command_array: Array = command_values
+		var output_array: Array = output_values
+		var commands: Array[Dictionary] = _copy_untyped_records(command_array)
+		var outputs: Array[Dictionary] = _copy_untyped_records(output_array)
 		result.append({"commands": commands, "outputs": outputs})
 	return result
 
@@ -598,7 +913,7 @@ static func _copy_supported_value(value: Variant) -> Variant:
 	if not _supports_row_value(value):
 		return null
 	if value is Dictionary or value is Array or OwnerCapture._is_packed_array(value):
-		return value.duplicate(true)
+		return OwnerCapture._copy_contract_value(value)
 	return value
 
 

@@ -19,5 +19,6 @@ scripts/check-godot-safe.sh
 # --remote-debug to an unbound port keeps Godot out of its local CLI debugger: with plain -d a
 # parse error drops into 'debug>' and, with stdin closed, the process exits 0 (a silent pass).
 # This mirrors addons/gdUnit4/runtest.sh. stdin stays closed as a second guard against hangs.
+scripts/check-godot-safe.sh
 "$GODOT_BIN" --headless --path . -s -d --remote-debug tcp://127.0.0.1:0 \
 	res://addons/gdUnit4/bin/GdUnitCmdTool.gd --ignoreHeadlessMode -a "$TARGET" -c </dev/null

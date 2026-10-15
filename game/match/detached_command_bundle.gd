@@ -43,11 +43,9 @@ static func _copy_record(record: RefCounted) -> RefCounted:
 	for method: Dictionary in record.get_method_list():
 		if method.get("name", "") == "detached_copy":
 			var copied: Variant = record.call("detached_copy")
-			if (
-				copied is RefCounted
-				and copied != record
-				and copied.get_script() == record.get_script()
-			):
-				return copied
+			if copied is RefCounted:
+				var copied_record: RefCounted = copied
+				if copied_record != record and copied_record.get_script() == record.get_script():
+					return copied_record
 			return null
 	return null

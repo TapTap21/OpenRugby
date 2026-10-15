@@ -11,24 +11,23 @@ var commands: DetachedCommandBundle:
 var outcome: SimTickOutcome:
 	get:
 		return _outcome
-var outputs: Array:
+var outputs: Array[RefCounted]:
 	get:
 		return SystemTickResult._copy_records(_outputs)
 var signal_batch: SignalBatch:
 	get:
 		return _signal_batch
-var candidate_attempt_id: int:
+var candidate_tick: int:
 	get:
-		return _candidate_attempt_id
+		return _outcome.candidate_tick
 
 var _sim: MatchSim
-var _candidate_attempt_id: int
 var _checkpoint: Dictionary
 var _owner_captures: Array[OwnerCapture]
 var _candidate_frame: InputFrame
 var _commands: DetachedCommandBundle
 var _outcome: SimTickOutcome
-var _outputs: Array
+var _outputs: Array[RefCounted]
 var _signal_batch: SignalBatch
 var _active: bool = true
 var _replay_source_row: Variant
@@ -41,9 +40,8 @@ func _init(
 	p_candidate_frame: InputFrame,
 	p_commands: DetachedCommandBundle,
 	p_outcome: SimTickOutcome,
-	p_outputs: Array,
+	p_outputs: Array[RefCounted],
 	p_signal_batch: SignalBatch,
-	p_candidate_attempt_id: int,
 	p_replay_source_row: Variant = null
 ) -> void:
 	_sim = p_sim
@@ -52,13 +50,6 @@ func _init(
 	_candidate_frame = SimTickContext._copy_frame(p_candidate_frame)
 	_commands = DetachedCommandBundle.new(p_commands.records_in_order())
 	_outcome = p_outcome
-	var typed_outputs: Array[RefCounted] = []
-	for output: Variant in p_outputs:
-		if not output is RefCounted:
-			typed_outputs.clear()
-			break
-		typed_outputs.append(output as RefCounted)
-	_outputs = SystemTickResult._copy_records(typed_outputs)
+	_outputs = SystemTickResult._copy_records(p_outputs)
 	_signal_batch = p_signal_batch
-	_candidate_attempt_id = p_candidate_attempt_id
 	_replay_source_row = p_replay_source_row

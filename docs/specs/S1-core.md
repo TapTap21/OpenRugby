@@ -137,16 +137,10 @@ participant claim, claims)`; failure is `(false, non-OK, UNSUPPORTED, null, empt
 `ParticipantClaim` is the canonical participant identity consumed by setup fingerprinting and
 contains `stable_participant_id: String`, `participant_version: String`,
 `configuration_fingerprint: String`, and `deterministic_initial_state_fingerprint: String`.
-Every field must be stable, canonical, and non-empty. Setup has no external publication side
-effects: a post-setup claim collision can reject registration without leaving published state.
-Setup rejects missing/malformed claims and
-duplicate stable participant identities. `participant_id_hint() -> String` may provide a non-empty
-stable participant ID before setup; the sim rejects an already registered hint before invoking
-setup, then validates the canonical claim and provider identities returned by setup. Provider
-ownership can only be checked after setup exposes those claims. `system_id()` may remain a
-diagnostic/display accessor; its legacy default `&"system"` is never a participant identity or
-fingerprint input. Fake participants can construct both successful and failing `SetupResult` values
-directly.
+Every field must be stable, canonical, and non-empty. Setup rejects missing/malformed claims and
+duplicate stable participant identities. `system_id()` may remain a diagnostic/display accessor;
+its legacy default `&"system"` is never a participant identity or fingerprint input. Fake
+participants can construct both successful and failing `SetupResult` values directly.
 
 Every mutable registered participant, including the required S2 port-state owner adapter, uses
 exactly one generic typed replay factory:
@@ -175,10 +169,13 @@ no-argument signature once for each mutable entry in the effective ordered `SimS
 there is no overload or runtime method-arity dispatch. Ordinary live `build(request)` retains the
 supplied objects.
 
-`SystemTickResult` is a constructible value record: `ok: bool`, `error: Error`, and ordered
-`outputs: Array[RefCounted]`. Each output record supplies `detached_copy()` returning a distinct
-same-script value. Success is `ok = true, error = OK`; failure is `ok = false, error != OK` and has
-no outputs. A fake participant can return either shape directly.
+`SystemTickResult` is a constructible value record: `ok: bool`, `error: Error`,
+`outputs: Array[RefCounted]`. `outputs` is a detached typed-record container of existing
+feature-owned immutable records; S1 introduces no universal output schema. Construction copies the
+array, and returned array getters are detached. Record values and nested mutable payloads are
+detached and sealed before publication. Success is `ok = true, error = OK` and may carry an empty
+or non-empty output array; failure is `ok = false, error != OK, outputs = []`. A fake participant
+can return either shape directly.
 
 `SimTickOwner extends SimSystem` is an opt-in owner participant in the same ordered system
 registry. It captures from an immutable generic `SimTickContext`, copied from candidate input and
@@ -310,7 +307,7 @@ stateful participant can use a non-empty immutable checkpoint value and return `
 a fake failure returns `CheckpointResult(false, null, ERR_FAILED)`. A dependency checkpoint is
 always a successfully captured value and has no independent `ok/error` status; provider checkpoint
 failure is represented by the containing `CheckpointResult`. `SimTickContext` exposes the
-1-based candidate tick, monotonically increasing per-sim `candidate_attempt_id`, copied candidate
+1-based candidate tick, copied candidate
 frame and previous-frame/edge view, detached typed command bundle, pre-tick clock/flow values, and
 the exact rational clock delta (`numerator`, positive `denominator`; zero represented as `0/1`).
 `SimTickOutcome` exposes the candidate tick, pre/post clock and flow values, selected transition
@@ -397,6 +394,14 @@ canonical_port_readback: CanonicalPortReadback) -> ReplayValidationResult`. The 
 is issued by its `InputLog`; the canonical readback is codec-authored after validating the port's
 full queue. The codec validates source-row fields, carried/new sequence rules, command/output
 linkage, and generated output equality before its authority registers and returns a token.
+For S2, `S2ReplayCodec.prepare_outputs(prepared_tick)` calls
+`S2RuntimePort.take_staged_result_suffix(requested_candidate_tick: int) ->
+S2StagedResultSuffixResult` with the exact candidate tick retained by that `PreparedTick`. It
+requires a successful result bound to that same tick and compares its detached typed
+`Array[S2RuntimeResult]` with the prepared aggregate by detached value and order before producing
+`PreparedOutputBundle`. This verifies producer-to-aggregate linkage without adding an S1
+command-bundle accessor. Replay validates through this same exact-tick prepared-output path before
+source-row comparison. The v3 wire fields, layout, and meanings remain unchanged.
 
 Construction: if `config.validate()` returns errors, the sim is invalid (`is_valid()` false,
 `push_error` once, and a checked tick does not change state). Otherwise:
@@ -421,7 +426,12 @@ opaque prepared-tick handle when applicable. Status is one of `PREPARED`, `COMMI
 `PREPARED` is an abortable successful execution, not a committed tick: it retains the complete
 pre-tick rollback checkpoint, and exposes detached validated typed outputs, the completed generic
 outcome, and staged signals. `outputs` is a detached ordered bundle of existing typed output
-records (for S2, `S2RuntimeResult` values); no new wire or command schema is introduced.
+records (`Array[RefCounted]`; for S2, existing `S2RuntimeResult` values); no new wire or command
+schema is introduced. Successful registered systems' outputs are concatenated in stable
+registration order, preserving each system's local order. Failed systems contribute no outputs; any
+later failure, abort, retryable/fatal failure, or no-op exposes an empty array. Prepared results
+retain the aggregate through coordinated finalization; committed results carry the same immutable
+record values. The result getter returns a detached array and may share immutable record references.
 For live recording, `COMMITTED` is assigned only after the runner has finalized the sim and
 committed the complete prepared log row. Replay uses its already complete, read-only source row and
 marks the tick committed only after output validation and sim finalization. `NO_OP_INVALID` has
@@ -466,14 +476,12 @@ runner-owned live tick publishes through the existing MatchSim signal interface 
 complete row commit, then relays to EventBus and emits `ticked`; replay publishes only after output
 validation and replay finalization.
 
-`tick_checked(frame, commands)` allocates exactly one increasing `candidate_attempt_id` when a live
-attempt opens. Aborted and failed attempts do not rewind or reuse it; the counter is excluded from
-simulation snapshots and hashes. Replay attempts allocate at `begin_replay_row` and carry the same
-ID through `tick_replay_row` once that S2-owned seam is implemented. `tick_checked(frame, commands)` copies and normalizes the candidate frame (using the wrong-shape
+`tick_checked(frame, commands)` copies and normalizes the candidate frame (using the wrong-shape
 all-zero fallback) and seals a detached immutable copy of the typed command bundle before any
 mutation. Its opaque `PreparedTick` retains those exact immutable candidate values and exposes
-read-only copied frame access, `candidate_attempt_id`, and candidate provenance; no getter permits mutation of the retained
-values. It then runs all fallible simulation phases without finalizing. On success it returns
+read-only copied frame access and `candidate_tick: int` (the 1-based tick being evaluated); no
+getter permits mutation of the retained values. It then runs all fallible simulation phases without
+finalizing. On success it returns
 `PREPARED`, bound to this sim and exact candidate; the rollback checkpoint remains live.
 `finalize_prepared_tick(prepared_tick, append_token)` is
 infallible, allocation-free, and performs no callbacks for the already-verified live authorization;
@@ -488,25 +496,10 @@ a tick only after validating its existing source row and finalizing sim state. T
 records that accompany this candidate; it introduces no universal command record or payload
 schema. `DetachedCommandBundleBuilder` is the mutable output object used only while sampling: its
 `append(existing_command_record) -> Error` accepts existing concrete typed command record values
-only when the record implements `detached_copy() -> RefCounted`; the returned value must be a
-distinct object of the same concrete script type. The bundle calls that method for every ingress
-and egress and rejects a missing, null, same-object, or substituted-type copy. Its
-`records_in_order() -> Array[RefCounted]` returns defensive concrete copies in stable order, so an
-S2 port can enumerate its own types without accepting an S1 bundle type at the port boundary. It has
+only (the existing command type/interface contract), preserving concrete types and order. It has
 no dictionary/variant payload overload and defines no new command payload schema. `seal() ->
 DetachedCommandBundle` copies/detaches the appended records into an immutable ordered bundle; a fresh builder seals to an immutable empty bundle. later
 builder or record mutation cannot change the sealed bundle. `InputSource.fill_frame` receives this builder as a submission builder. The runner copies the sampled frame and seals submissions before preparation. For live S2, it validates/enqueues those submitted records, reads and decodes the S2 port-assigned canonical `queued_command_snapshots()` into a distinct final typed candidate bundle, and pairs that bundle with the sampled frame. This exact pair is passed to `tick_checked`, retained by `PreparedTick`, encoded by the codec, and recorded. Non-S2 input uses the sealed submission bundle as its candidate; commandless input uses an immutable empty bundle. Replay supplies recorded records through the same typed codec/port route and treats the verified canonical port readback as the final candidate. The method performs one transaction:
-
-S1 generic row capabilities are `PreparedAppendToken` and `ReplaySourceRow` identities. The token's
-public no-argument construction is inert. An `InputLog` reserves a fully copied row before sim
-finalization; `MatchSim.finalize_prepared_tick` consumes only the exact token bound to its active
-prepared handle, and `InputLog.commit_append` publishes only after that exact sim finalization.
-Cancellation is allowed only before finalization. Abort leaves the reservation cancellable and
-invalidates sim finalization authority. Replay rows are detached, log-issued snapshots; caller
-constructed rows are inert. The checked-in tree does not yet contain the S2 codec/port or its typed
-replay-validation authority integration. Therefore direct replay receipt minting/finalization and
-S2 output validation remain blocked on the separately owned S2 implementation; S1 does not invent a
-generic replay codec or command/output record schema to bridge that absence.
 
 `MatchSim.tick(frame) -> TickResult` is a required compatibility wrapper for standalone sims. It
 calls `tick_checked(frame, DetachedCommandBundleBuilder.new().seal())`; on `PREPARED`, it finalizes
@@ -718,11 +711,13 @@ structures remain parseable and round-trip compatible: serialization preserves t
 legacy records or dropping version-specific fields. Version-specific fingerprint handling is:
 format v1 omits the setup fingerprint on wire and parses with an empty in-memory value; format v2
 requires the field to exist and be a String, preserving its value including the empty string on
-parse/round-trip; format v3 requires a present, correctly typed, non-empty fingerprint. Playback
-accepts exactly format v3
-and rejects every format below v3 before setup capture or tick. `ReplayHeader.is_compatible_with`
-enforces this playback gate as well as all identity and tick-rate comparisons; direct replay entry
-points also check the version explicitly before setup preparation so their behavior is unambiguous.
+parse/round-trip; format v3 requires a present, correctly typed, non-empty fingerprint. Playback accepts exactly format v3. Direct `MatchReplay.run` rejects a null log/header as
+`INVALID_RECORD`, then rejects any typed header whose version is not v3 as `INCOMPATIBLE_HEADER`,
+before starting replay composition; neither path runs extension, participant, provider, or system
+setup. `MatchRunner.start` builds its replay composition first, then rejects a non-v3 header before
+source polling, setup capture, tick, or publication, following its order in §3.4.
+`ReplayHeader.is_compatible_with` applies the v3 format requirement together with identity and
+tick-rate comparisons against the prepared current composition.
 There is no supported v3-without-fingerprint variant or adapter. This contract is version-neutral
 against the implementation checkout and does not assert the version or fields currently declared
 by the public `ReplayHeader` class; integration preserves S2's v3 semantics.
@@ -732,16 +727,12 @@ remain stable), `var header: ReplayHeader`, `_init(p_header: ReplayHeader)`,
 `read_replay_row(index: int) -> ReplaySourceRowResult`,
 `prepare_append(prepared_tick: PreparedTick, command_bundle: EncodedCommandBundle,
 output_bundle: PreparedOutputBundle) -> AppendPrepareResult`,
-`commit_append(token: PreparedAppendToken) -> Error`, and
+`commit_append(token: PreparedAppendToken) -> void`, and
 `cancel_append(token: PreparedAppendToken) -> Error`. The explicitly fixture/import-only
 `append_fixture_row(frame: InputFrame, command_records: Array[Dictionary],
 output_records: Array[Dictionary]) -> Error` supports manual serialization fixtures and legacy raw
 imports. It is never used by `MatchRunner`, does not finalize a sim tick, and makes no claim that a
-simulation tick committed; a wrong-shaped frame is rejected without changing the log. The current
-S1 implementation does not yet contain the S2-owned `EncodedCommandBundle`, `PreparedOutputBundle`,
-`S2ReplayCodec`, or composition builder. Transactional production append and replay therefore remain
-unavailable; the checked-out generic dictionary preparation implementation is not the approved
-production API. `PreparedOutputBundle` is opaque and can be
+simulation tick committed; a wrong-shaped frame is rejected without changing the log. `PreparedOutputBundle` is opaque and can be
 created only by `S2ReplayCodec.prepare_outputs(prepared_tick: PreparedTick) -> CodecResult` from
 that exact tick's validated detached `TickResult.outputs`; callers cannot pass an arbitrary output
 array to the codec. A successful bundle retains the prepared-tick identity, encoded detached output
@@ -800,15 +791,7 @@ source/encoded-command identity, candidate-frame identity, output-bundle identit
 reserved index/generation, and exact row identity. Only the exact internally minted token object with its private registered nonce is accepted; a
 caller-created object cannot reproduce that capability. Token fields and a token copy/reassembly
 constructor are not public. The log verifies all
-bindings and active reservation state on every use. `MatchSim.finalize_prepared_tick(prepared_tick, append_token)` requires the exact still-active tick and matching log token and consumes the prepared tick; `commit_append(append_token)` requires that same token to have been marked finalized by that sim. `finalize_prepared_tick`, `commit_append`, and `cancel_append` reject an inert caller-created token without consuming the active tick/reservation or publishing a row. Cancelled, consumed, stale, cross-log, cross-tick, independently-created-output, or row-substituted tokens are rejected and cannot publish. All validation, encoding, row construction/copying, and allocation happen before finalization, and ordinary failures abort the tick and cancel the token while rollback remains possible. No process-termination atomicity is promised: the enforceable contract is the capability pairing in normal execution. Finalization and valid-path `commit_append` are infallible, allocation-free, callback-free, with no callbacks between them; the Error-returning commit rejects invalid capabilities and returns `OK` after publishing the already-built row. Thus the complete row is observable before staged sim signals, EventBus relays, or runner `ticked`.
-
-The current implementation fails closed for replay entry points. `MatchReplay.run` returns null,
-`MatchRunner.start(ReplayInputSource)` returns `ERR_UNCONFIGURED`, and replay-source polling returns
-false until the S2 codec can validate complete source rows and mint the reviewed one-shot receipt.
-`finalize_replay_tick` returning `ERR_UNCONFIGURED` does not complete replay support. Remaining S2
-prerequisites include typed codec/bundle records, canonical port readback and one-time owner
-attachment, replay transaction opened at `begin_replay_row`, full-row validation, receipt authority,
-composition wiring, and v3 header/wire migration.
+bindings and active reservation state on every use. `MatchSim.finalize_prepared_tick(prepared_tick, append_token)` requires the exact still-active tick and matching log token and consumes the prepared tick; `commit_append(append_token)` requires that same token to have been marked finalized by that sim. `finalize_prepared_tick`, `commit_append`, and `cancel_append` reject an inert caller-created token without consuming the active tick/reservation or publishing a row. Cancelled, consumed, stale, cross-log, cross-tick, independently-created-output, or row-substituted tokens are rejected and cannot publish. All validation, encoding, row construction/copying, and allocation happen before finalization, and ordinary failures abort the tick and cancel the token while rollback remains possible. No process-termination atomicity is promised: the enforceable contract is the capability pairing in normal execution. Finalization and commit are infallible, allocation-free, callback-free, with no callbacks between them; `commit_append` only publishes the already-built row. Thus the complete row is observable before staged sim signals, EventBus relays, or runner `ticked`.
 
 The runner passes `tick_checked` the frame and detached typed command bundle represented by the
 port's authoritative readback. For replay, it uses the verified canonical port readback after
@@ -936,7 +919,7 @@ and single codec, and no caller receives a mint/consume method.
 `PROVIDER_OWNERSHIP_FAILED`. `subject` identifies a stable input key or participant/provider
 identity when known and is empty only when no single subject applies. The diagnostic message is
 not identity or fingerprint input. `MatchReadinessReport` is the single immutable public report
-type for build blockers and replay readiness; it contains a detached
+type for build blockers and evaluated replay readiness; it contains a detached
 `blockers: Array[MatchReadinessBlocker]` and `is_ready() -> bool`, true exactly when the list is
 empty.
 
@@ -949,25 +932,52 @@ Failure is `(false, null, null, empty fingerprint, report with one or more block
 The report does not replace the `error`; diagnostic message text is not fingerprinted.
 
 `static run(request: MatchCompositionRequest, log: InputLog) -> MatchReplayResult`, where
-`MatchReplayResult` contains `sim: MatchSim | null`, `error: Error`, optional typed
-`replay_failure: ReplayFailure`, `fatal_reason: StringName` (empty except for
-`FATAL_ROLLBACK`), and `readiness: MatchReadinessReport`. `ReplayFailure` is one of
-`INVALID_RECORD`, `INVALID_LINKAGE`, `INCOMPATIBLE_HEADER`, `PORT_RESET_FAILED`, `TICK_FAILED`,
-`OUTPUT_MISMATCH`, or `FATAL_ROLLBACK`. `FATAL_ROLLBACK` is distinct from ordinary/retryable
-`TICK_FAILED`; direct replay returns `sim == null`, non-OK `error`, this typed failure, a non-empty
-`fatal_reason`, preserved build readiness, unchanged source log, and no publication.
-A composition failure returns typed readiness blockers. Compatibility or row failures return
-`sim == null`, non-OK error, typed replay failure where applicable, and build readiness. A
-successful replay returns its sim and `OK`. Direct replay and live runner startup use the same
-request and builder; replay uses the recorded seed but never treats the header as current
-action-layout identity. It checks v3 format, mod hash, explicit current action-layout hash, setup
-fingerprint, and tick rate before polling, owner capture, tick, append, or publication. Missing
-config, contact source/solver, player/fatigue, ball/wind setup, unsafe hooks, or other required
-inputs remain typed readiness blockers.
+`MatchReplayResult` contains `sim: MatchSim | null`, `error: Error`, typed
+`replay_failure: ReplayFailure` (`NONE` when there is no replay failure),
+`fatal_reason: StringName` (empty except for `FATAL_ROLLBACK`),
+`readiness_evaluation: ReadinessEvaluation`, and `readiness: MatchReadinessReport`.
+`ReplayFailure` is one of `NONE`, `INVALID_RECORD`, `INVALID_LINKAGE`, `INCOMPATIBLE_HEADER`,
+`PORT_RESET_FAILED`, `TICK_FAILED`, `OUTPUT_MISMATCH`, or `FATAL_ROLLBACK`.
+`ReadinessEvaluation` is one of `NOT_EVALUATED`, `PREFLIGHT_ONLY`, or `BUILDER_COMPLETE`.
 
-Direct and runner-driven replay share this ordered path: call `build_replay(request)`, check the
-header against the fresh build, and reset that fresh port exactly once before the first row. A false
-reset returns `PORT_RESET_FAILED` with no tick or publication. For each index, read exactly one
+`readiness_evaluation` is `NOT_EVALUATED` for a null log/header or any typed header whose version
+is not v3. In these cases `readiness` is a non-null empty placeholder, and `readiness.is_ready()`
+is not evidence of composition readiness; the record/version failure is reported by
+`error`/`replay_failure`, not as a build blocker. It is `PREFLIGHT_ONLY` for a null request or a
+dependency-shareability preflight that returns before replay composition is built. The report may
+then carry known blockers (including the generic `build(null)` missing-config diagnostic), but it
+is incomplete and may omit other composition blockers. `PREFLIGHT_ONLY` remains incomplete even
+when its report is empty or `is_ready()` returns true. It is `BUILDER_COMPLETE` only after
+`MatchCompositionBuilder.build_replay(request)` returns; the result then preserves that builder's
+complete readiness report through builder failure, later compatibility, reset, row, tick, success,
+or fatal rollback outcomes. Callers must inspect `readiness_evaluation` before treating the report
+as a complete readiness result.
+
+`FATAL_ROLLBACK` is distinct from ordinary/retryable `TICK_FAILED`; direct replay returns
+`sim == null`, non-OK `error`, this typed failure, a non-empty `fatal_reason`,
+`readiness_evaluation == BUILDER_COMPLETE`, unchanged source log, and no publication. A
+compatibility or row failure after composition returns `sim == null`, non-OK error, typed replay
+failure, and the evaluated builder report. A successful replay returns its sim, `OK`,
+`replay_failure == NONE`, `readiness_evaluation == BUILDER_COMPLETE`, and a ready builder report.
+Direct replay and live runner startup use the same request and builder; replay uses the recorded
+seed but never treats the header as current action-layout identity. It checks v3 format, mod hash,
+explicit current action-layout hash, setup fingerprint, and tick rate before polling, owner capture,
+tick, append, or publication. After composition evaluation, missing config, contact source/solver,
+player/fatigue, ball/wind setup, unsafe hooks, or other required inputs remain typed readiness
+blockers.
+
+Direct replay validates `log` and `log.header` first; a null value returns `INVALID_RECORD`, and any
+typed `format_version != 3` returns `INCOMPATIBLE_HEADER`, both before replay composition setup.
+A null request may return the generic builder's missing-config diagnostic without completing the
+replay build. The dependency-shareability preflight may accumulate known blockers and return
+without building. These early paths have `readiness_evaluation == PREFLIGHT_ONLY` and a possibly
+partial report. A null log/header or non-v3 typed header instead has
+`readiness_evaluation == NOT_EVALUATED` and the empty placeholder. Only a valid v3 request that
+passes preflight starts `build_replay(request)`. When it returns,
+`readiness_evaluation == BUILDER_COMPLETE` and its builder report is complete. The direct path then
+checks the header against that build and resets the fresh port exactly once before the first row.
+Runner-driven replay follows the §3.4 order and checks the header after its composition build. A
+false reset returns `PORT_RESET_FAILED` with no tick or publication. For each index, read exactly one
 `ReplaySourceRow` snapshot and capability from the source log; decode its frame, commands, and
 expected outputs from that object. Begin the row transaction before injecting any new recorded
 commands. Call `begin_replay_row(source_row)` before sequence validation or injection to retain the
@@ -1018,11 +1028,12 @@ func interpolation_fraction() -> float
   setup fingerprint for versioned initial owner/system/provider setup), connects relays and returns
   `OK`. Live mode creates its own recording `InputLog`. Replay mode uses the `ReplayInputSource`
   backing log as read-only `input_log` and never appends a second recording. A live source may use
-  the base empty action-layout identity. For a `ReplayInputSource`, an
-  empty/missing `request.action_layout_hash` rejects before polling, capture, tick, log append, or
-  publication. Otherwise it first checks that its header is format v3 and has a valid
-  fingerprint, then compares mod hash, explicit current action-layout identity, freshly built setup
-  fingerprint and tick rate. Any mismatch returns `ERR_INVALID_PARAMETER` before the runner can
+  the base empty action-layout identity. For a `ReplayInputSource`, the composition build
+  completes before replay-header checks. An empty/missing `request.action_layout_hash` rejects
+  before polling, capture, tick, log append, or publication. Otherwise it first checks that its
+  header is format v3 and has a valid fingerprint, then compares mod hash, explicit current
+  action-layout identity, freshly built setup fingerprint and tick rate. Any mismatch returns
+  `ERR_INVALID_PARAMETER` before the runner can
   sample input or mutate/publish sim state. On a match, call the fresh replay port's
   `reset_runtime()` exactly once before frame 0; reset failure returns `PORT_RESET_FAILED`.
 - `RunnerResult` is a record with `status`, `error`, and optional typed `replay_failure`; status is
@@ -1273,9 +1284,10 @@ names even in comments.
 - C-26 Recording with `MatchRunner`, serialising with
   `to_bytes`/`from_bytes`, then `MatchReplay.run` gives the same final `state_hash()` as the
   original run.
-- C-27 A mod-set mismatch returns `MatchReplayResult` with `sim == null`, non-OK error, typed
-  `INCOMPATIBLE_HEADER` replay failure, and the current build readiness report; it
-  is rejected before capture or tick. A matching replay returns a result with non-null sim and `OK`.
+- C-27 A v3 mod-set mismatch returns `MatchReplayResult` with `sim == null`, non-OK error,
+  `replay_failure == INCOMPATIBLE_HEADER`, `readiness_evaluation == BUILDER_COMPLETE`, and the complete
+  current build readiness report; it is rejected before capture or tick. A matching replay returns
+  a result with non-null sim, `OK`, `readiness_evaluation == BUILDER_COMPLETE`, and a ready report.
 
 **Input log**
 - C-28 `InputLog` round-trips through `to_bytes`/`from_bytes` and `save`/`load_file`
@@ -1329,11 +1341,15 @@ names even in comments.
   once in stable registry order before the first system tick. Systems retain existing registration
   order and observe captured pre-update owner values
   throughout the tick. Owner commits run in stable registry order after flow staging and receive
-  the completed generic outcome. Invalid, finished, and stopped no-op ticks capture no owners.
+  the completed generic outcome. Successful systems' outputs concatenate in registration order,
+  preserving producer-local order; the S2 port owner contributes no outputs. Invalid, finished,
+  and stopped no-op ticks capture no owners and expose no outputs.
 - C-46 Injected failures during owner capture, system tick, checked flow staging, and owner commit restore
   the complete pre-tick state: tick count, current/previous input edges, RNG, clock/flow, triggers,
   every system, owner and owned stateful provider, S2 port pending commands/results/sequence, and
-  staged events. Successful rollback returns
+  staged events. A failure after an earlier producer completion exposes no aggregate output and
+  restores the exact port output suffix; explicit retry publishes each successful completion once.
+  Successful rollback returns
   `FAILED_RETRYABLE`; no failed phase returns a signal batch, appends a log entry, or publishes a
   sim, runner, or EventBus signal. Non-restorable stateful participants/providers and unsupported
   capabilities are rejected before tick 1. Flow failure is injected by enabling the documented
@@ -1344,10 +1360,18 @@ names even in comments.
   automatically. A successful retry matches a clean run and publishes each event once.
 - C-48 The runner encodes/validates commands before tick execution. A command encoding failure
   does not tick or mutate sim state. After a `PREPARED` tick, it encodes/validates outputs and
-  prepares/reserves the complete frame/commands/outputs row while rollback remains possible. An
+  prepares/reserves the complete frame/commands/outputs row while rollback remains possible. For
+  S2, assert `take_staged_result_suffix(prepared_tick.candidate_tick)` returns
+  `(true, requested_tick, exact_active_staged_tick, detached typed results, OK)` and the codec
+  compares those results by detached value and order with that exact prepared tick's aggregate.
+  Before the matching successful take, a wrong requested tick returns `ERR_INVALID_PARAMETER`,
+  empty results, and the active bound staged tick without consuming availability; repeating a
+  successful take returns `ERR_ALREADY_EXISTS`, empty results, and keeps the take consumed for the
+  transaction. Neither failed attempt exposes a partial suffix or publishes a row. An
   output/full-row preparation failure aborts/restores the tick, retains the exact sampled candidate,
   does not publish or expose a row, and explicit retry repeats preparation without polling or
-  re-enqueueing. On success, sim finalization and row commit occur infallibly,
+  re-enqueueing. The retry creates a fresh candidate transaction and makes its staged suffix
+  available for one successful take. On success, sim finalization and row commit occur infallibly,
   allocation-free and with no callbacks between, before staged MatchSim signals/EventBus relays and
   `ticked` last. Invalid/stale tokens or candidate substitution cannot change the log.
 - C-49 `fill_frame() == false` returns terminal `SOURCE_EXHAUSTED`, stops, emits `input_ended`,
@@ -1417,7 +1441,10 @@ names even in comments.
   aborts flow staging. Successful rollback restores the full pre-tick state and returns
   `FAILED_RETRYABLE` with no outcome/batch, log append or publication; retrying after disabling
   the condition commits the exact candidate once.
-- C-59 Fake participants can construct successful and failing `SystemTickResult`,
+- C-59 Fake participants can construct successful `SystemTickResult` values with empty and
+  non-empty `Array[RefCounted]` outputs and failing values with empty outputs. Constructors and
+  returned array getters detach the array; published records are immutable. Fake participants can
+  also construct successful and failing
   `OwnerCaptureResult` (success includes a non-null immutable `OwnerCapture.payload`),
   `OwnerCommitResult`, and `CheckpointResult`; successful `CheckpointResult` carries a non-empty
   checkpoint value for stateful participants. Fake owners can construct `SimDependencyCheckpoint`
@@ -1433,11 +1460,13 @@ names even in comments.
   legacy records. A v1 header omits the setup fingerprint on parse input and `to_dict()` output,
   while its in-memory fingerprint is empty. Parsing rejects a missing, wrongly typed, or empty
   setup fingerprint for v3 at `ReplayHeader.from_dict` and `InputLog.from_bytes`; v2 requires a
-  present String and preserves even `""` through parse/serialization. Playback
-  through `ReplayHeader.is_compatible_with`, `MatchRunner.start`, and direct `MatchReplay.run`
-  rejects every version below v3 before setup capture or tick; v3 requires a correctly typed
-  non-empty setup fingerprint. Current v3 fatigue field names, values and timing retain C-55
-  semantics; no fieldless-v3 compatibility adapter is accepted or implied.
+  present String and preserves even `""` through parse/serialization. Playback through
+  `ReplayHeader.is_compatible_with`, `MatchRunner.start`, and direct `MatchReplay.run` accepts
+  exactly v3. Direct replay rejects a null log/header and every typed non-v3 version before replay
+  composition setup; runner startup checks after its composition build and before source polling,
+  capture, or tick. V3 requires a correctly typed non-empty setup fingerprint. Current v3 fatigue
+  field names, values and timing retain C-55 semantics; no fieldless-v3 compatibility adapter is
+  accepted or implied.
 - C-62 `MatchRunner.start` with a matching ReplayInputSource header, current mod hash, explicit
   current action-layout identity, current setup fingerprint and tick rate succeeds. Independently
   mismatch each identity and verify start rejects before source polling, owner capture, sim tick,
@@ -1467,15 +1496,29 @@ names even in comments.
   fields and duplicate participant identities reject setup before tick 1. The legacy
   `system_id() == &"system"` default is never used as the canonical participant identity. Setup
   fingerprint changes when any stable participant or provider claim value changes.
-- C-66 Direct `MatchReplay.run` always returns a `MatchReplayResult` object. For below-v3 headers
-  (including v1/v2), a constructible v3 header with an empty setup fingerprint, or an empty
-  expected action-layout identity, assert `sim == null`, `INCOMPATIBLE_HEADER`, non-OK error,
-  retained build readiness report, and no capture, tick, or publication. With a valid v3 header,
-  independently mismatch mod-set hash, current action-layout identity, setup fingerprint, and tick
-  rate; each result has that same rejected result shape before capture or tick. Parser rejection of
-  missing or wrongly typed serialized fingerprint fields remains at `ReplayHeader.from_dict` and
-  `InputLog.from_bytes` as specified by C-61; a typed empty header is this direct replay case.
-  A matching v3 replay returns non-null sim and `OK`, and preserves C-55 fatigue semantics.
+- C-66 Direct `MatchReplay.run` always returns a `MatchReplayResult` object. A null log/header
+  returns `sim == null`, `replay_failure == INVALID_RECORD`, non-OK error,
+  `readiness_evaluation == NOT_EVALUATED`, and an empty non-null report before setup/capture/tick/
+  reset/publication. Any typed header with `format_version != 3` (including v1, v2, and future
+  versions) returns `sim == null`, `replay_failure == INCOMPATIBLE_HEADER`, non-OK error,
+  `readiness_evaluation == NOT_EVALUATED`, and an empty report before replay composition setup.
+  Assert neither path invokes extension/provider/system factories or setup. A null request returns
+  non-OK error with `readiness_evaluation == PREFLIGHT_ONLY`; its report may contain the generic
+  missing-config diagnostic but is not complete replay readiness. Make a dependency non-shareable
+  and assert the preflight returns with `replay_failure == NONE`, non-OK error,
+  `readiness_evaluation == PREFLIGHT_ONLY`, its known blocker(s), and no replay composition build.
+  `PREFLIGHT_ONLY` reports are incomplete even when `is_ready()` is true; only
+  `BUILDER_COMPLETE` reports describe full replay readiness. For a v3 request that completes the
+  replay composition build, an empty setup fingerprint, empty expected action-layout identity, or
+  independently mismatched mod-set hash, current action-layout identity, setup fingerprint, or tick
+  rate returns `sim == null`, `replay_failure == INCOMPATIBLE_HEADER`, non-OK error,
+  `readiness_evaluation == BUILDER_COMPLETE`, and the complete builder report before capture, tick,
+  reset, or publication. Builder failures after that build also retain its complete report. Parser
+  rejection of missing or wrongly typed serialized fingerprint fields remains at
+  `ReplayHeader.from_dict` and `InputLog.from_bytes` as specified by C-61; a typed empty v3 header is
+  a post-build direct replay case. A matching v3 replay returns non-null sim, `OK`,
+  `replay_failure == NONE`, `readiness_evaluation == BUILDER_COMPLETE`, a ready report, and preserves
+  C-55 fatigue semantics.
 - C-67 A v3 log round-trips per-frame `runtime.commands` and `runtime.outputs` with exact row,
   record, and sequence order. During live recording, observe the committed complete row from a
   signal relay and from `ticked`; both see the row before publication. Output encoding/validation
@@ -1486,7 +1529,12 @@ names even in comments.
   token paired with another tick, an independently created output bundle, or a reused/cancelled
   token. A matching prepared tick/output bundle/row token commits successfully before relay. A
   malformed record, missing command/output linkage, duplicate/reordered sequence, or generated-output
-  mismatch rejects replay before that tick is finalized or published. Verify port pending/results/
+  mismatch rejects replay before that tick is finalized or published. On the same exact-tick
+  prepared-output path, `S2ReplayCodec.prepare_outputs(prepared_tick)` must successfully take
+  `S2RuntimePort.take_staged_result_suffix(prepared_tick.candidate_tick) ->
+  S2StagedResultSuffixResult`, and the prepared S2 aggregate must equal its detached
+  `Array[S2RuntimeResult]` by value and order; fabricated, duplicate, reordered, or altered
+  aggregate records reject. Verify port pending/results/
   sequence are present in runtime snapshots and hashes; owner/system/output-codec/log-row failure
   restores exact pre-tick port state; and successful live/replay finalization exposes no intermediate
   queue/result/sequence mutation before the full row commits; committed readback and hashes match
@@ -1521,14 +1569,16 @@ names even in comments.
   canonical order. Preparation and retry failures preserve
   those exact commands/sequences without a second enqueue or new sequence assignment. Replay applies
   the full-queue carried/new rule in §3.3/§3.4, preserves recorded sequence values, validates full
-  canonical readback, and compares generated outputs against commands in the full row. No second S1
-  command schema is introduced.
+  canonical readback, and compares generated outputs against commands in the full row. Producer
+  outputs concatenate in registration order with producer-local completion order preserved; the
+  port owner adds no duplicate records. No second S1 command schema is introduced.
 - C-72 With tick N leaving command sequence 0 unconsumed, row N+1 repeats that exact command
   unchanged and introduces sequence 1. Replay preserves command 0 once (does not enqueue it twice),
   injects only sequence 1, and accepts its later output when command 0 is consumed. Reject a carried
   command that is missing, changed in any payload field, duplicated, or reordered against canonical
-  port order. Verify port pending readback equals each complete row and the post-commit survivors
-  seed the following comparison.
+  port order. Preserve the carried command's canonical sequence and kind; the port, not the
+  producer, supplies those result fields. Verify port pending readback equals each complete row and
+  the post-commit survivors seed the following comparison.
 - C-73 Exercise append authorization: mutate the caller's original frame after tick preparation
   and attempt to pair another candidate's frame with the prepared tick; the committed row must use
   the immutable `PreparedTick` frame and `prepare_append` exposes no frame argument. Reject a
@@ -1564,9 +1614,10 @@ names even in comments.
   once. Force generated-output mismatch and assert rollback-capable abort with no publication,
   accepted result, or source-log mutation. Direct and runner replay publish only after
   receipt-backed finalization.
-- C-76 Force a restore failure during direct replay and assert exact `MatchReplayResult` shape:
-  `sim == null`, non-OK error, `replay_failure == FATAL_ROLLBACK` (distinct from `TICK_FAILED`),
-  non-empty `fatal_reason`, preserved build readiness, unchanged source log, and no publication.
+- C-76 Force a restore failure during a v3 direct replay and assert exact `MatchReplayResult`
+  shape: `sim == null`, non-OK error, `replay_failure == FATAL_ROLLBACK` (distinct from
+  `TICK_FAILED`), non-empty `fatal_reason`, `readiness_evaluation == BUILDER_COMPLETE`, complete preserved
+  build readiness, unchanged source log, and no publication.
 - C-77 Use a stateful fake owner/system and stateful fake injected provider. Advance live objects,
   then replay the same request/log; assert fresh independent objects begin in deterministic initial
   state, initial/per-tick hashes and outputs match, and original post-live objects remain unchanged.

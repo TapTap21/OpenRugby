@@ -33,7 +33,6 @@ var _active_prepared_tick: PreparedTick
 var _publishable_signal_batch: SignalBatch
 var _live_append_token: PreparedAppendToken
 var _append_registration: Dictionary = {}
-var _candidate_attempt_id: int = 0
 
 
 func _init(p_config: MatchConfig) -> void:
@@ -127,7 +126,6 @@ func tick_checked(frame: InputFrame, commands: DetachedCommandBundle = null) -> 
 		return _no_op(TickResult.Status.NO_OP_FINISHED, OK)
 	if _active_prepared_tick != null:
 		return _failure(ERR_BUSY)
-	_candidate_attempt_id += 1
 	_publishable_signal_batch = null
 	var candidate: InputFrame = _normalize_frame(frame)
 	var command_copy: DetachedCommandBundle = (
@@ -138,12 +136,20 @@ func tick_checked(frame: InputFrame, commands: DetachedCommandBundle = null) -> 
 	if not command_copy.is_valid():
 		return _failure(ERR_INVALID_DATA)
 	var delta: Vector2i = _clock_delta()
-	var context: SimTickContext = _make_context(
-		candidate, command_copy, delta, _candidate_attempt_id
-	)
+	var context: SimTickContext = _make_context(candidate, command_copy, delta)
+	if context == null:
+		return _failure(ERR_OUT_OF_MEMORY)
 	var checkpoint_result: Dictionary = _capture_checkpoint()
-	if not checkpoint_result.ok:
-		return _failure(checkpoint_result.error)
+	var checkpoint_ok_value: Variant = checkpoint_result.get("ok")
+	if not checkpoint_ok_value is bool:
+		return _failure(ERR_INVALID_DATA)
+	var checkpoint_ok: bool = checkpoint_ok_value
+	if not checkpoint_ok:
+		var checkpoint_error_value: Variant = checkpoint_result.get("error")
+		if not checkpoint_error_value is int:
+			return _failure(ERR_INVALID_DATA)
+		var checkpoint_error: Error = checkpoint_error_value
+		return _failure(checkpoint_error)
 	var captures: Array[OwnerCapture] = []
 	for system: SimSystem in _systems:
 		if system is SimTickOwner:
@@ -219,15 +225,7 @@ func tick_checked(frame: InputFrame, commands: DetachedCommandBundle = null) -> 
 			)
 	var batch: SignalBatch = SignalBatch.new(staged)
 	var prepared: PreparedTick = PreparedTick.new(
-		self,
-		checkpoint_result,
-		captures,
-		candidate,
-		command_copy,
-		outcome,
-		outputs,
-		batch,
-		_candidate_attempt_id
+		self, checkpoint_result, captures, candidate, command_copy, outcome, outputs, batch
 	)
 	_active_prepared_tick = prepared
 	return TickResult.new(TickResult.Status.PREPARED, OK, outcome, outputs, batch, prepared)
@@ -241,7 +239,9 @@ func tick(frame: InputFrame) -> TickResult:
 	var finalize_error: Error = finalize_standalone_tick(result.prepared_tick)
 	if finalize_error != OK:
 		if _is_active_handle(result.prepared_tick):
-			abort_prepared_tick(result.prepared_tick)
+			var abort_error: Error = abort_prepared_tick(result.prepared_tick)
+			if abort_error != OK:
+				return _failure(abort_error, abort_error == ERR_BUG)
 		return _failure(finalize_error)
 	publish_staged_signals(result.signal_batch)
 	return TickResult.new(
@@ -251,14 +251,27 @@ func tick(frame: InputFrame) -> TickResult:
 
 ## Finalizes a runner-authorized prepared tick. The token is validated by the runner boundary.
 func finalize_prepared_tick(prepared_tick: PreparedTick, append_token: PreparedAppendToken) -> void:
+	var registered_log_value: Variant = _append_registration.get("log")
+	var registered_tick_value: Variant = _append_registration.get("prepared_tick")
+	var registered_token_value: Variant = _append_registration.get("token")
+	if (
+		not registered_log_value is InputLog
+		or not registered_tick_value is PreparedTick
+		or not registered_token_value is PreparedAppendToken
+	):
+		return
+	var registered_log: InputLog = registered_log_value
+	var registered_tick: PreparedTick = registered_tick_value
+	var registered_token: PreparedAppendToken = registered_token_value
 	if (
 		_runner_owned
 		and _is_active_handle(prepared_tick)
 		and append_token != null
 		and not _append_registration.is_empty()
-		and _append_registration.prepared_tick == prepared_tick
-		and _append_registration.token == append_token
-		and _append_registration.log._finalize_registered_append(append_token, self, prepared_tick)
+		and registered_tick == prepared_tick
+		and registered_token == append_token
+		and registered_log != null
+		and registered_log._finalize_registered_append(append_token, self, prepared_tick)
 	):
 		_live_append_token = append_token
 		_append_registration.clear()
@@ -288,7 +301,10 @@ func abort_prepared_tick(prepared_tick: PreparedTick) -> Error:
 		return ERR_INVALID_PARAMETER
 	var checkpoint: Dictionary = prepared_tick._checkpoint
 	if not _append_registration.is_empty():
-		_append_registration.log._invalidate_for_tick(prepared_tick)
+		var registered_log_value: Variant = _append_registration.get("log")
+		if registered_log_value is InputLog:
+			var registered_log: InputLog = registered_log_value
+			registered_log._invalidate_for_tick(prepared_tick)
 		_append_registration.clear()
 	if _live_append_token != null:
 		_live_append_token = null
@@ -297,7 +313,7 @@ func abort_prepared_tick(prepared_tick: PreparedTick) -> Error:
 	if _restore_checkpoint(checkpoint):
 		return OK
 	_latch_fatal_stop()
-	return ERR_FAILED
+	return ERR_BUG
 
 
 ## Publishes a finalized batch through the existing local MatchSim signals.
@@ -450,12 +466,14 @@ func _normalize_frame(frame: InputFrame) -> InputFrame:
 
 
 func _make_context(
-	frame: InputFrame, commands: DetachedCommandBundle, delta: Vector2i, attempt_id: int
+	frame: InputFrame, commands: DetachedCommandBundle, delta: Vector2i
 ) -> SimTickContext:
 	var pressed: PackedInt64Array = PackedInt64Array()
 	var released: PackedInt64Array = PackedInt64Array()
-	pressed.resize(config.slot_count)
-	released.resize(config.slot_count)
+	var pressed_resize_error: Error = pressed.resize(config.slot_count)
+	var released_resize_error: Error = released.resize(config.slot_count)
+	if pressed_resize_error != OK or released_resize_error != OK:
+		return null
 	for slot: int in range(config.slot_count):
 		var prior: int = _previous.buttons[slot] if tick_count > 0 else 0
 		pressed[slot] = frame.buttons[slot] & ~prior
@@ -476,8 +494,7 @@ func _make_context(
 		flow.ticks_in_state,
 		_pending_triggers,
 		delta.x,
-		delta.y,
-		attempt_id
+		delta.y
 	)
 
 
@@ -509,7 +526,8 @@ func _capture_checkpoint() -> Dictionary:
 			continue
 		var result: CheckpointResult = _systems[index].checkpoint()
 		if not _valid_checkpoint_result(result, capability):
-			return {"ok": false, "error": _checkpoint_error(result)}
+			var checkpoint_error: Error = _checkpoint_error(result)
+			return {"ok": false, "error": checkpoint_error}
 		system_checkpoints.append(result.value)
 	return {
 		"ok": true,
@@ -528,31 +546,104 @@ func _capture_checkpoint() -> Dictionary:
 
 
 func _restore_checkpoint(checkpoint: Dictionary) -> bool:
+	if (
+		not checkpoint.has("ok")
+		or not checkpoint.has("tick")
+		or not checkpoint.has("rng_state")
+		or not checkpoint.has("period")
+		or not checkpoint.has("elapsed_ticks")
+		or not checkpoint.has("flow_state")
+		or not checkpoint.has("flow_ticks")
+		or not checkpoint.has("finished")
+		or not checkpoint.has("pending_triggers")
+		or not checkpoint.has("current")
+		or not checkpoint.has("previous")
+		or not checkpoint.has("systems")
+	):
+		return false
+	var ok_value: Variant = checkpoint.get("ok")
+	var tick_value: Variant = checkpoint.get("tick")
+	var rng_state_value: Variant = checkpoint.get("rng_state")
+	var period_value: Variant = checkpoint.get("period")
+	var elapsed_ticks_value: Variant = checkpoint.get("elapsed_ticks")
+	var flow_state_value: Variant = checkpoint.get("flow_state")
+	var flow_ticks_value: Variant = checkpoint.get("flow_ticks")
+	var finished_value: Variant = checkpoint.get("finished")
+	var trigger_values: Variant = checkpoint.get("pending_triggers")
+	var current_value: Variant = checkpoint.get("current")
+	var previous_value: Variant = checkpoint.get("previous")
+	var system_values_value: Variant = checkpoint.get("systems")
+	if not ok_value is bool:
+		return false
+	var checkpoint_ok: bool = ok_value
+	if not checkpoint_ok:
+		return false
+	if (
+		not tick_value is int
+		or not rng_state_value is int
+		or not period_value is int
+		or not elapsed_ticks_value is int
+		or not flow_state_value is StringName
+		or not flow_ticks_value is int
+		or not finished_value is bool
+		or not trigger_values is Array
+		or not current_value is InputFrame
+		or not previous_value is InputFrame
+		or not system_values_value is Array
+	):
+		return false
+	var systems: Array = system_values_value
+	if systems.size() != _systems.size():
+		return false
+	var restored_current: InputFrame = current_value
+	var restored_previous: InputFrame = previous_value
+	if (
+		restored_current.slot_count != config.slot_count
+		or restored_current.axes_per_slot != config.axes_per_slot
+		or restored_current.buttons.size() != config.slot_count
+		or restored_current.axes.size() != config.slot_count * config.axes_per_slot
+		or restored_previous.slot_count != config.slot_count
+		or restored_previous.axes_per_slot != config.axes_per_slot
+		or restored_previous.buttons.size() != config.slot_count
+		or restored_previous.axes.size() != config.slot_count * config.axes_per_slot
+	):
+		return false
+	var checkpoint_tick: int = tick_value
+	var rng_state: int = rng_state_value
+	var checkpoint_period: int = period_value
+	var checkpoint_elapsed_ticks: int = elapsed_ticks_value
+	var checkpoint_flow_state: StringName = flow_state_value
+	var checkpoint_flow_ticks: int = flow_ticks_value
+	var checkpoint_finished: bool = finished_value
+	var restored_triggers: Array[StringName] = []
+	for trigger_value: Variant in trigger_values:
+		if not trigger_value is StringName:
+			return false
+		restored_triggers.append(trigger_value)
 	var restored: bool = true
-	var values: Array = checkpoint.systems
 	for index: int in range(_systems.size() - 1, -1, -1):
 		if _setup_results[index].capability == TransactionCapability.EXPLICITLY_STATELESS:
 			continue
-		if _systems[index].restore(values[index]) != OK:
+		if _systems[index].restore(systems[index]) != OK:
 			restored = false
-	tick_count = checkpoint.tick
-	rng.set_state(checkpoint.rng_state)
-	clock.period = checkpoint.period
-	clock.elapsed_ticks = checkpoint.elapsed_ticks
-	flow.current = checkpoint.flow_state
-	flow.ticks_in_state = checkpoint.flow_ticks
-	_finished = checkpoint.finished
-	_pending_triggers = checkpoint.pending_triggers.duplicate()
-	_current.copy_from(checkpoint.current)
-	_previous.copy_from(checkpoint.previous)
+	tick_count = checkpoint_tick
+	rng.set_state(rng_state)
+	clock.period = checkpoint_period
+	clock.elapsed_ticks = checkpoint_elapsed_ticks
+	flow.current = checkpoint_flow_state
+	flow.ticks_in_state = checkpoint_flow_ticks
+	_finished = checkpoint_finished
+	_pending_triggers = restored_triggers
+	_current.copy_from(restored_current)
+	_previous.copy_from(restored_previous)
 	return restored
 
 
 func _rollback_failure(checkpoint: Dictionary, phase_error: Error) -> TickResult:
 	if _restore_checkpoint(checkpoint):
-		return _failure(phase_error if phase_error != OK else ERR_FAILED)
+		return _failure(phase_error if phase_error != OK else ERR_BUG)
 	_latch_fatal_stop()
-	return _failure(phase_error if phase_error != OK else ERR_FAILED, true)
+	return _failure(phase_error if phase_error != OK else ERR_BUG, true)
 
 
 func _stage_transition(transition: MatchTransitionDef, staged: Array[StagedSignal]) -> void:
@@ -601,7 +692,7 @@ func _no_op(status: TickResult.Status, error: Error) -> TickResult:
 func _failure(error: Error, fatal: bool = false) -> TickResult:
 	return TickResult.new(
 		TickResult.Status.FATAL_ROLLBACK if fatal else TickResult.Status.FAILED_RETRYABLE,
-		error if error != OK else ERR_FAILED
+		error if error != OK else ERR_BUG
 	)
 
 
