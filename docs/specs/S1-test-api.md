@@ -252,12 +252,37 @@ matching staged suffix, failure has empty results, non-OK `ERR_UNCONFIGURED`, an
 when no active bound tick exists. All arrays are detached copies; result records and nested payloads
 are sealed immutable records, and failure results never expose a partial suffix. S2 also exposes
 `capture_tick(context)`, which binds the candidate tick and initializes an empty staged suffix.
-Successful `complete_command(command, result, consumer_phase)` calls append sealed results to that
-suffix. S2 binds the full immutable ordered `context.commands` snapshot to canonical
-queued-command snapshots before consumption, freezes sequence/snapshot/kind/phase membership, and
-accepts each successful completion once in its matching phase. LocomotionSystem, BallPhysicsSystem,
-and S2InteractionSystem return only their newly completed successful result suffixes in completion
-order; the owner captures, checkpoints, and restores state and returns no outputs. The S2 codec
-compares the registered-system aggregate to the exact staged port suffix by detached value and
-order. S1 does not add a generic port protocol, generic command/output schema, or public
-checkpoint-payload fields to make a fake convenient.
+`S2RuntimePort` exposes this S2-owned callable:
+
+```gdscript
+func complete_command(
+		command: S2RuntimeCommand,
+		result: S2RuntimeResult,
+		consumer_phase: S2RuntimeCommand.Phase
+) -> S2CommandCompletionResult
+```
+
+`S2CommandCompletionResult` is an S2-owned immutable result record, not a generic S1 type. Its
+constructor is `_init(p_ok: bool, p_result: S2RuntimeResult | null, p_error: Error)` and its
+constructor fields, in order, are `ok: bool`, `result: S2RuntimeResult | null`, and `error: Error`.
+Success is `(true, canonical_result, OK)`, where the port supplies sequence and kind from its frozen
+canonical command membership, not from producer fields. The canonical result and nested payloads
+are detached, sealed, immutable records. Failure is `(false, null, non-OK)`: reject unknown or
+changed commands, wrong phase, duplicate sequence, unsuccessful result, or malformed/uncopyable
+payload. A failed call consumes no command, stores or stages no result, and advances no queue,
+sequence, or result state. The producer returns failed `SystemTickResult`, causing outer S1 abort.
+
+Record getters return detached result values; constructor inputs and any nested mutable payloads are
+detached, and published nested records are sealed. Successful completion calls append the same
+canonical value to the port's global results and staged suffix in deterministic call/completion
+order. The completing producer appends the returned `canonical_result` to its own
+`SystemTickResult.outputs` in the same order as its successful calls. It never appends the submitted
+result argument or reconstructs local outputs by reading the global suffix. Systems run in registry
+order, so S1's registration-order concatenation of producer-local output arrays equals the exact
+global staged suffix. LocomotionSystem, BallPhysicsSystem, and S2InteractionSystem return only their
+newly completed successful result records in completion order; the owner captures, checkpoints,
+and restores state and returns no outputs. The S2 codec compares the registered-system aggregate to
+the exact staged port suffix by detached value and order. `take_staged_result_suffix` remains solely
+the codec's one-shot PREPARED validation readback API described above. S1 does not add a generic port
+protocol, generic command/output schema, or public checkpoint-payload fields to make a fake
+convenient.

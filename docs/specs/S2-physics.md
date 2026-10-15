@@ -136,14 +136,41 @@ server from `MatchSim`.
 consumption, canonical result storage, next sequence, failure metadata, and the staged output suffix.
 It is registered once as an S1 owner adapter and returns no duplicate output records. The output
 producers are `LocomotionSystem`, `BallPhysicsSystem`, and `S2InteractionSystem`; each successful
-checked tick returns only the newly completed successful `S2RuntimeResult` suffix, in completion
+checked tick returns only the newly completed successful `S2RuntimeResult` records, in completion
 order. S1 concatenates those producer arrays in registration order and preserves each local order.
 
 Before any consumer runs, successful `capture_tick(context)` binds the candidate frame tick on the
-port and initializes that candidate's staged result suffix as empty. Each successful
-`complete_command` appends its sealed result to the staged suffix. After all systems finish,
-PREPARED validation can inspect the exact successful `S2RuntimeResult` suffix for that tick using
-the typed API:
+port and initializes that candidate's staged result suffix as empty. Completion uses this typed
+API:
+
+```gdscript
+func complete_command(
+		command: S2RuntimeCommand,
+		result: S2RuntimeResult,
+		consumer_phase: S2RuntimeCommand.Phase
+) -> S2CommandCompletionResult
+```
+
+`S2CommandCompletionResult` is an S2-owned immutable record with constructor fields, in order,
+`ok: bool`, `result: S2RuntimeResult | null`, and `error: Error`. Success is
+`(true, canonical_result, OK)`. `canonical_result` is the exact canonical completion value: its
+sequence and kind come from the port's frozen canonical command membership, never from producer
+fields. It and its nested payloads are detached, sealed, immutable records. The completing producer
+appends this returned `canonical_result` to its own `SystemTickResult.outputs` in the same order as
+its successful `complete_command` calls. It never appends the submitted `result` argument or reads
+the global port suffix to reconstruct its local outputs.
+
+Failure is `(false, null, non-OK)`. Reject an unknown or changed command, wrong phase, duplicate
+sequence, unsuccessful result, or malformed/uncopyable payload. A rejected call consumes no
+command, appends no stored result or staged suffix entry, and advances no queue, sequence, or result
+state. The producer returns a failed `SystemTickResult`, causing outer S1 abort. Every successful
+completion call appends the same canonical value to the port's global results and staged suffix in
+deterministic call/completion order. Systems run in registry order; therefore, as S1 concatenates
+system-local outputs in registration order, producer arrays concatenate to the exact global staged
+suffix.
+
+After all systems finish, PREPARED validation can inspect the exact successful
+`S2RuntimeResult` suffix for that tick using the typed API:
 
 ```gdscript
 func take_staged_result_suffix(requested_candidate_tick: int) -> S2StagedResultSuffixResult
@@ -170,9 +197,8 @@ candidate. Consumers receive detached command values for their declared phase. A
 is completed through `complete_command(command, result, consumer_phase)`: it succeeds only in the
 active transaction, for exact canonical membership in the matching phase, and once per sequence.
 The port supplies sequence and kind from its canonical entry rather than trusting producer fields.
-Unknown, changed, wrong-phase, duplicate, or unsuccessful completion fails the tick. Accepted but
-unconsumed commands remain queued unchanged for a later tick; every consumed accepted command has
-exactly one successful result.
+Any rejected completion fails the producer tick; accepted but unconsumed commands remain queued
+unchanged for a later tick, and every consumed accepted command has exactly one successful result.
 
 At successful completion, copy the result through the existing snapshot/decode validation path,
 then detach and seal the copied result and child payload before the port retains or returns it. A
@@ -386,19 +412,22 @@ must exercise the same S2 systems.
 
 ### Runtime port transaction and publication
 
-- **R-01 Producer aggregation:** have each output-producing registered system return multiple
-  records, including a producer with no new completions. Assert the S1 aggregate preserves system
-  registration order and each producer's local completion order; `S2RuntimePortOwner` contributes
-  no records.
+- **R-01 Producer aggregation:** have each output-producing registered system complete multiple
+  records, including a producer with no new completions. Assert each producer appends each returned
+  canonical completion record to its local outputs in completion order, and that the S1 aggregate
+  preserves system registration order and equals the global staged suffix exactly;
+  `S2RuntimePortOwner` contributes no records.
 - **R-02 Canonical command binding:** make `context.commands` differ from canonical queued snapshots
   by omission, addition, reordering, and a changed payload. Each capture fails before any command
   is consumed. For accepted commands, assert consumer values are detached and sequence/snapshot/kind/
   phase membership remains the exact frozen canonical membership.
 - **R-03 Completion membership and cardinality:** reject unknown commands, changed snapshots,
-  wrong-phase completion, duplicate completion for one sequence, and unsuccessful completion.
-  Assert sequence and kind in accepted results come from the canonical port entry. Accepted
-  unconsumed commands remain unchanged in queue order; every consumed accepted command has exactly
-  one successful result.
+  wrong-phase completion, duplicate completion for one sequence, unsuccessful results, and
+  malformed/uncopyable payloads. Assert every rejected call returns `(false, null, non-OK)` and
+  makes no queue, sequence, stored-result, or staged-suffix mutation. Assert success returns
+  `(true, canonical_result, OK)` with sequence and kind from the frozen canonical port entry and a
+  detached sealed result. Accepted unconsumed commands remain unchanged in queue order; every
+  consumed accepted command has exactly one successful result.
 - **R-04 Exact aggregate suffix:** call
   `take_staged_result_suffix(prepared_tick.candidate_tick)` and accept the successful matching
   result only when the prepared S1 aggregate equals its detached values in exact order. Assert a
@@ -407,10 +436,11 @@ must exercise the same S2 systems.
   call fails with `ERR_ALREADY_EXISTS` and empty results. Reject fabricated, omitted, duplicate,
   reordered, or altered aggregate records. Failure records expose no partial suffix.
 - **R-05 Publication sealing and readback:** mutate producer-held result and nested payload aliases
-  after successful completion and assert retained/returned published output is unchanged. Assert
-  readback records are detached and sealed while returned snapshot dictionaries/arrays can be
-  mutated without changing port state. Keep an unpublished `PassLaunch` mutable and assert only its
-  detached nested published copy is sealed.
+  after successful completion and assert the returned canonical result, retained/stored result,
+  staged suffix, and published output remain unchanged. Assert readback records are detached and
+  sealed while returned snapshot dictionaries/arrays can be mutated without changing port state.
+  Keep an unpublished `PassLaunch` mutable and assert only its detached nested published copy is
+  sealed.
 - **R-06 Failure, rollback, and retry:** inject copy/decode failure at completion and a later
   owner/system/flow/output-encoding/replay-validation/row-preparation failure after a successful
   suffix take. Assert no failed result is consumed or published. Only outer S1 abort restores the
