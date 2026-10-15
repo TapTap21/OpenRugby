@@ -29,15 +29,15 @@ func configure(pitch: PitchGeometry) -> void:
 func _add_field(pitch: PitchGeometry) -> void:
 	var total_length: float = pitch.field_length + 2.0 * pitch.in_goal_depth
 	var half_width: float = pitch.half_width()
-	_add_plane("Turf", Vector2(total_length, pitch.field_width), Vector3.ZERO, TURF_GREEN)
+	_add_plane("Turf", Vector2(pitch.field_width, total_length), Vector3.ZERO, TURF_GREEN)
 	var band_width: float = pitch.field_width / float(MOW_BAND_COUNT)
 	for band_index: int in range(MOW_BAND_COUNT):
 		if band_index % 2 == 0:
-			var band_z: float = -half_width + (float(band_index) + 0.5) * band_width
+			var band_x: float = -half_width + (float(band_index) + 0.5) * band_width
 			_add_plane(
 				"MowBand%d" % band_index,
-				Vector2(total_length, band_width),
-				Vector3(0.0, 0.003, band_z),
+				Vector2(band_width, total_length),
+				Vector3(band_x, 0.003, 0.0),
 				MOWED_GREEN
 			)
 
@@ -46,72 +46,84 @@ func _add_markings(pitch: PitchGeometry) -> void:
 	var half_length: float = pitch.half_length()
 	var half_width: float = pitch.half_width()
 	var field_width: float = pitch.field_width
-	var total_length: float = pitch.field_length + 2.0 * pitch.in_goal_depth
-	_add_line("Halfway", Vector3.ZERO, Vector3(LINE_WIDTH, 0.05, field_width))
+	_add_line("Halfway", Vector3.ZERO, Vector3(field_width, 0.05, LINE_WIDTH))
 	for end: int in [-1, 1]:
 		_add_line(
 			"TryLine%d" % end,
-			Vector3(pitch.try_line_x(end), 0.03, 0.0),
-			Vector3(LINE_WIDTH, 0.05, field_width)
+			Vector3(0.0, 0.03, pitch.try_line_z(end)),
+			Vector3(field_width, 0.05, LINE_WIDTH)
 		)
 		_add_line(
 			"DeadBallLine%d" % end,
-			Vector3(pitch.dead_ball_line_x(end), 0.03, 0.0),
-			Vector3(LINE_WIDTH, 0.05, field_width)
+			Vector3(0.0, 0.03, pitch.dead_ball_line_z(end)),
+			Vector3(field_width, 0.05, LINE_WIDTH)
 		)
 		_add_line(
 			"TwentyTwo%d" % end,
-			Vector3(pitch.line_22_x(end), 0.03, 0.0),
-			Vector3(LINE_WIDTH, 0.05, field_width)
+			Vector3(0.0, 0.03, pitch.line_22_z(end)),
+			Vector3(field_width, 0.05, LINE_WIDTH)
 		)
 		_add_line(
 			"FiveMetre%d" % end,
-			Vector3(end * (half_length - pitch.line_5_from_try), 0.03, 0.0),
-			Vector3(LINE_WIDTH, 0.05, field_width)
+			Vector3(0.0, 0.03, end * (half_length - pitch.line_5_from_try)),
+			Vector3(field_width, 0.05, LINE_WIDTH)
 		)
 	for half: int in [-1, 1]:
 		_add_line(
 			"TenMetre%d" % half,
-			Vector3(half * pitch.line_10_from_halfway, 0.03, 0.0),
-			Vector3(LINE_WIDTH, 0.05, field_width)
+			Vector3(0.0, 0.03, half * pitch.line_10_from_halfway),
+			Vector3(field_width, 0.05, LINE_WIDTH)
 		)
 	for side: int in [-1, 1]:
 		_add_line(
 			"Touchline%d" % side,
-			Vector3(0.0, 0.03, side * half_width),
-			Vector3(pitch.field_length, 0.05, LINE_WIDTH)
+			Vector3(side * half_width, 0.03, 0.0),
+			Vector3(LINE_WIDTH, 0.05, pitch.field_length)
 		)
 		for distance: float in [pitch.line_5_from_touch, pitch.line_15_from_touch]:
 			_add_line(
 				"TouchReference%d_%d" % [side, int(distance)],
-				Vector3(0.0, 0.02, side * (half_width - distance)),
-				Vector3(pitch.field_length, 0.025, LINE_WIDTH * 0.55)
+				Vector3(side * (half_width - distance), 0.02, 0.0),
+				Vector3(LINE_WIDTH * 0.55, 0.025, pitch.field_length)
 			)
 	_add_line(
-		"NearDeadBall", Vector3(0.0, 0.03, -half_width), Vector3(total_length, 0.05, LINE_WIDTH)
+		"NearDeadBall",
+		Vector3(0.0, 0.03, -pitch.half_length() - pitch.in_goal_depth),
+		Vector3(field_width, 0.05, LINE_WIDTH)
 	)
 	_add_line(
-		"FarDeadBall", Vector3(0.0, 0.03, half_width), Vector3(total_length, 0.05, LINE_WIDTH)
+		"FarDeadBall",
+		Vector3(0.0, 0.03, pitch.half_length() + pitch.in_goal_depth),
+		Vector3(field_width, 0.05, LINE_WIDTH)
 	)
 
 
 func _add_goal_posts(pitch: PitchGeometry, end: int) -> void:
-	var x: float = pitch.try_line_x(end)
-	var post_thickness: float = 0.24
-	var half_gap: float = (pitch.goal_post_gap + post_thickness) * 0.5
+	var z: float = pitch.try_line_z(end)
+	var radius: float = pitch.goal_post_radius
+	var half_gap: float = pitch.goal_post_gap * 0.5 + radius
 	var material: StandardMaterial3D = _material(PAINT_WHITE)
 	for side: int in [-1, 1]:
-		_add_box(
-			"GoalUpright%d" % side,
-			Vector3(x, pitch.goal_post_height * 0.5, side * half_gap),
-			Vector3(post_thickness, pitch.goal_post_height, post_thickness),
+		_add_cylinder(
+			"GoalUpright%d_%d" % [end, side],
+			Vector3(side * half_gap, (pitch.goal_post_bottom + pitch.goal_post_top) * 0.5, z),
+			2.0 * radius,
+			pitch.goal_post_top - pitch.goal_post_bottom,
 			material
 		)
-	_add_box(
-		"GoalCrossbar",
-		Vector3(x, pitch.crossbar_height, 0.0),
-		Vector3(post_thickness, 0.22, pitch.goal_post_gap + post_thickness),
-		material
+		_add_box(
+			"GoalPostPad%d_%d" % [end, side],
+			Vector3(side * half_gap, pitch.goal_pad_height * 0.5, z),
+			Vector3(pitch.goal_pad_size, pitch.goal_pad_height, pitch.goal_pad_size),
+			_material(STAND_LIGHT)
+		)
+	_add_cylinder(
+		"GoalCrossbar%d" % end,
+		Vector3(0.0, pitch.crossbar_height - radius, z),
+		2.0 * radius,
+		pitch.goal_post_gap + 2.0 * radius,
+		material,
+		Vector3(0.0, 0.0, 90.0)
 	)
 
 
@@ -119,26 +131,26 @@ func _add_stands(pitch: PitchGeometry) -> void:
 	var half_width: float = pitch.half_width()
 	var stand_length: float = pitch.field_length + 2.0 * pitch.in_goal_depth + 16.0
 	for side: int in [-1, 1]:
-		var center_z: float = side * (half_width + 12.0)
+		var center_x: float = side * (half_width + 12.0)
 		for tier: int in range(5):
 			_add_box(
-				"StandTier%d" % tier,
-				Vector3(0.0, 0.9 + float(tier) * 1.05, center_z + side * float(tier) * 0.75),
-				Vector3(stand_length - float(tier) * 2.0, 1.1, 7.5 - float(tier) * 0.55),
+				"StandTier%d_%d" % [side, tier],
+				Vector3(center_x + side * float(tier) * 0.75, 0.9 + float(tier) * 1.05, 0.0),
+				Vector3(7.5 - float(tier) * 0.55, 1.1, stand_length - float(tier) * 2.0),
 				_material(STAND_DARK if tier % 2 == 0 else STAND_LIGHT)
 			)
 		_add_box(
-			"StandRoof",
-			Vector3(0.0, 7.8, center_z + side * 1.0),
-			Vector3(stand_length, 0.4, 9.0),
+			"StandRoof%d" % side,
+			Vector3(center_x + side * 1.0, 7.8, 0.0),
+			Vector3(9.0, 0.4, stand_length),
 			_material(STAND_DARK)
 		)
-		_add_crowd(side, pitch, center_z)
+		_add_crowd(side, pitch, center_x)
 	for end: int in [-1, 1]:
 		_add_end_stand(end, pitch)
 
 
-func _add_crowd(side: int, pitch: PitchGeometry, center_z: float) -> void:
+func _add_crowd(side: int, pitch: PitchGeometry, center_x: float) -> void:
 	var crowd_mesh: BoxMesh = BoxMesh.new()
 	crowd_mesh.size = Vector3(0.32, 0.7, 0.28)
 	var crowd_material: StandardMaterial3D = StandardMaterial3D.new()
@@ -151,7 +163,7 @@ func _add_crowd(side: int, pitch: PitchGeometry, center_z: float) -> void:
 	multimesh.transform_format = MultiMesh.TRANSFORM_3D
 	multimesh.use_colors = true
 	multimesh.mesh = crowd_mesh
-	var columns: int = int((pitch.field_length + 8.0) / 0.65)
+	var columns: int = int((pitch.field_length + 2.0 * pitch.in_goal_depth + 8.0) / 0.65)
 	const ROWS: int = 5
 	multimesh.instance_count = columns * ROWS
 	var rng: RandomNumberGenerator = RandomNumberGenerator.new()
@@ -159,8 +171,8 @@ func _add_crowd(side: int, pitch: PitchGeometry, center_z: float) -> void:
 	var index: int = 0
 	for row: int in range(ROWS):
 		for column: int in range(columns):
-			var x: float = -pitch.half_length() - 3.5 + float(column) * 0.65
-			var z: float = center_z + side * (float(row) * 0.82 - 1.65)
+			var x: float = center_x + side * (float(row) * 0.82 - 1.65)
+			var z: float = -pitch.half_length() - pitch.in_goal_depth - 3.5 + float(column) * 0.65
 			var y: float = 1.4 + float(row) * 0.95
 			var transform: Transform3D = Transform3D(Basis.IDENTITY, Vector3(x, y, z))
 			multimesh.set_instance_transform(index, transform)
@@ -173,25 +185,25 @@ func _add_crowd(side: int, pitch: PitchGeometry, center_z: float) -> void:
 
 
 func _add_end_stand(end: int, pitch: PitchGeometry) -> void:
-	var center_x: float = end * (pitch.half_length() + pitch.in_goal_depth + 12.0)
-	var stand_width: float = pitch.field_width + 2.0 * pitch.in_goal_depth + 20.0
+	var center_z: float = end * (pitch.half_length() + pitch.in_goal_depth + 12.0)
+	var stand_width: float = pitch.field_width + 20.0
 	for tier: int in range(5):
 		_add_box(
-			"EndStandTier%d" % tier,
-			Vector3(center_x + end * float(tier) * 0.75, 0.9 + float(tier) * 1.05, 0.0),
-			Vector3(7.5 - float(tier) * 0.55, 1.1, stand_width - float(tier) * 2.0),
+			"EndStandTier%d_%d" % [end, tier],
+			Vector3(0.0, 0.9 + float(tier) * 1.05, center_z + end * float(tier) * 0.75),
+			Vector3(stand_width - float(tier) * 2.0, 1.1, 7.5 - float(tier) * 0.55),
 			_material(STAND_DARK if tier % 2 == 0 else STAND_LIGHT)
 		)
 	_add_box(
-		"EndStandRoof",
-		Vector3(center_x + end, 7.8, 0.0),
-		Vector3(9.0, 0.4, stand_width),
+		"EndStandRoof%d" % end,
+		Vector3(0.0, 7.8, center_z + end),
+		Vector3(stand_width, 0.4, 9.0),
 		_material(STAND_DARK)
 	)
-	_add_end_crowd(end, pitch, center_x)
+	_add_end_crowd(end, pitch, center_z)
 
 
-func _add_end_crowd(end: int, pitch: PitchGeometry, center_x: float) -> void:
+func _add_end_crowd(end: int, pitch: PitchGeometry, center_z: float) -> void:
 	var crowd_mesh: BoxMesh = BoxMesh.new()
 	crowd_mesh.size = Vector3(0.28, 0.7, 0.32)
 	var crowd_material: StandardMaterial3D = StandardMaterial3D.new()
@@ -204,7 +216,7 @@ func _add_end_crowd(end: int, pitch: PitchGeometry, center_x: float) -> void:
 	multimesh.transform_format = MultiMesh.TRANSFORM_3D
 	multimesh.use_colors = true
 	multimesh.mesh = crowd_mesh
-	var columns: int = int((pitch.field_width + 2.0 * pitch.in_goal_depth + 8.0) / 0.65)
+	var columns: int = int((pitch.field_width + 8.0) / 0.65)
 	const ROWS: int = 5
 	multimesh.instance_count = columns * ROWS
 	var rng: RandomNumberGenerator = RandomNumberGenerator.new()
@@ -212,8 +224,8 @@ func _add_end_crowd(end: int, pitch: PitchGeometry, center_x: float) -> void:
 	var index: int = 0
 	for row: int in range(ROWS):
 		for column: int in range(columns):
-			var x: float = center_x + end * (float(row) * 0.82 - 1.65)
-			var z: float = -pitch.half_width() - pitch.in_goal_depth - 3.5 + float(column) * 0.65
+			var x: float = -pitch.half_width() - 3.5 + float(column) * 0.65
+			var z: float = center_z + end * (float(row) * 0.82 - 1.65)
 			var y: float = 1.4 + float(row) * 0.95
 			var transform: Transform3D = Transform3D(Basis.IDENTITY, Vector3(x, y, z))
 			multimesh.set_instance_transform(index, transform)
@@ -246,6 +258,28 @@ func _add_plane(plane_name: String, size: Vector2, location: Vector3, tint: Colo
 
 func _add_line(line_name: String, location: Vector3, dimensions: Vector3) -> void:
 	_add_box(line_name, location, dimensions, _material(PAINT_WHITE))
+
+
+func _add_cylinder(
+	mesh_name: String,
+	location: Vector3,
+	diameter: float,
+	length: float,
+	mesh_material: StandardMaterial3D,
+	rotation_degrees: Vector3 = Vector3.ZERO
+) -> void:
+	var cylinder: MeshInstance3D = MeshInstance3D.new()
+	cylinder.name = mesh_name
+	cylinder.position = location
+	cylinder.rotation_degrees = rotation_degrees
+	var mesh: CylinderMesh = CylinderMesh.new()
+	mesh.top_radius = diameter * 0.5
+	mesh.bottom_radius = diameter * 0.5
+	mesh.height = length
+	mesh.radial_segments = 8
+	cylinder.mesh = mesh
+	cylinder.material_override = mesh_material
+	add_child(cylinder)
 
 
 func _add_box(

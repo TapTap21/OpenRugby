@@ -1055,31 +1055,35 @@ func interpolation_fraction() -> float
 
 ## 4. Pitch geometry
 
-`PitchGeometry` (`Resource`), metres. Coordinates: origin at the centre of the halfway line,
-+Y up, X along the length (try lines at x = ±L/2; `end` is `1` for +X and `-1` for -X),
-Z across (touchlines at z = ±W/2).
+`PitchGeometry` (`Resource`), metres. Coordinates from RE 06 §2.1: origin at the centre spot,
++Y up, X across the pitch (touchlines at x = ±W/2), Z along its length (try lines at z = ±L/2;
+`end` is `1` for +Z and `-1` for -Z).
 
 | Field | Type | Default | Note |
 |---|---|---|---|
 | `field_length` | float | 100.0 | try line to try line, TBC-RE |
-| `field_width` | float | 70.0 | touchline to touchline, TBC-RE |
-| `in_goal_depth` | float | 10.0 | try line to dead-ball line (law range 6..22), TBC-RE |
-| `line_22_from_try` | float | 22.0 | TBC-RE |
+| `field_width` | float | 67.4 | derived from RE 06 §2.1 pitch-line model, provisional until stadium selection |
+| `in_goal_depth` | float | 14.1 | RE 06 §2.1 |
+| `line_22_from_try` | float | 22.0 | RE 06 §2.1; line at z = ±28 m |
 | `line_10_from_halfway` | float | 10.0 | TBC-RE |
 | `line_5_from_try` | float | 5.0 | TBC-RE |
 | `line_15_from_touch` | float | 15.0 | TBC-RE |
 | `line_5_from_touch` | float | 5.0 | TBC-RE |
-| `goal_post_gap` | float | 5.6 | inside edges, TBC-RE |
-| `crossbar_height` | float | 3.0 | TBC-RE |
-| `goal_post_height` | float | 16.0 | PROVISIONAL, visual only |
+| `goal_post_gap` | float | 5.6 | inside edges, RE 06 §2.1 |
+| `crossbar_height` | float | 3.0 | top, RE 06 §2.1 |
+| `goal_post_radius` | float | 0.045 | stadium collision mesh, RE 06 §2.1 |
+| `goal_post_bottom` | float | 2.0 | stadium collision mesh, RE 06 §2.1 |
+| `goal_post_top` | float | 13.41 | stadium collision mesh; venue-specific, RE 06 §2.1 |
+| `goal_pad_size` | float | 0.49 | stadium collision mesh box side, RE 06 §2.1 |
+| `goal_pad_height` | float | 2.0 | stadium collision mesh, RE 06 §2.1 |
 
-Methods: `half_length() -> float`, `half_width() -> float`, `try_line_x(end: int) -> float`
-(`end * L/2`), `dead_ball_line_x(end: int) -> float` (`end * (L/2 + in_goal_depth)`),
-`line_22_x(end: int) -> float` (`end * (L/2 - line_22_from_try)`),
-`is_in_field_of_play(p: Vector3) -> bool` (`|x| < L/2` and `|z| < W/2`),
-`is_in_goal(p: Vector3, end: int) -> bool` (`L/2 <= end*x < L/2 + in_goal_depth` and `|z| < W/2`),
-`is_in_touch(p: Vector3) -> bool` (`|z| >= W/2` and `|x| < L/2`),
-`is_beyond_dead_ball_line(p: Vector3) -> bool` (`|x| >= L/2 + in_goal_depth`),
+Methods: `half_length() -> float`, `half_width() -> float`, `try_line_z(end: int) -> float`
+(`end * L/2`), `dead_ball_line_z(end: int) -> float` (`end * (L/2 + in_goal_depth)`),
+`line_22_z(end: int) -> float` (`end * (L/2 - line_22_from_try)`),
+`is_in_field_of_play(p: Vector3) -> bool` (`|z| < L/2` and `|x| < W/2`),
+`is_in_goal(p: Vector3, end: int) -> bool` (`L/2 <= end*z < L/2 + in_goal_depth` and `|x| < W/2`),
+`is_in_touch(p: Vector3) -> bool` (`|x| >= W/2` and `|z| < L/2`),
+`is_beyond_dead_ball_line(p: Vector3) -> bool` (`|z| >= L/2 + in_goal_depth`),
 `validate() -> PackedStringArray` (error per non-positive length/width/in-goal/post field, and
 when `line_22_from_try >= L/2` or `2 * line_15_from_touch >= W`).
 The line-ownership rules above (try line belongs to in-goal, touchline is in touch) are the law;
@@ -1263,9 +1267,9 @@ names even in comments.
 
 **Pitch**
 - C-35 `default_pitch.tres` has the defaults of section 4 and `validate()` is empty.
-- C-36 With defaults: `try_line_x(1) == 50`, `dead_ball_line_x(-1) == -60`, `line_22_x(1) == 28`;
-  `(0,0,0)` in field of play; `(50,0,0)` in goal for end 1, not in field of play; `(49.9,0,34.9)`
-  in field of play; `(10,0,35)` in touch; `(60,0,0)` beyond dead-ball line and not in goal.
+- C-36 With defaults: `try_line_z(1) == 50`, `dead_ball_line_z(-1) == -64.1`, `line_22_z(1) == 28`;
+  `(0,0,0)` in field of play; `(0,0,50)` in goal for end 1, not in field of play; `(33.6,0,49.9)`
+  in field of play; `(33.7,0,10)` in touch; `(0,0,64.11)` beyond dead-ball line and not in goal.
 - C-37 `validate()` reports `field_length = 0` and `line_22_from_try = 60`.
 
 **Data**

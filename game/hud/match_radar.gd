@@ -9,7 +9,8 @@ const CONTROLLED_COLORS: Array[Color] = [
 const DOT_SIZE: Vector2 = Vector2(9.0, 9.0)
 
 @export var field_length: float = 100.0
-@export var field_width: float = 70.0
+@export var field_width: float = 67.4
+@export var in_goal_depth: float = 14.1
 @export var home_color: Color = Color("ba332d")
 @export var away_color: Color = Color("315d8b")
 
@@ -67,8 +68,10 @@ func _update_team(dots: Array[ColorRect], positions: Array[Vector3], tint: Color
 		if not dot.visible:
 			continue
 		var position: Vector3 = positions[player_index]
-		var fraction_x: float = clampf(position.x / field_length + 0.5, 0.0, 1.0)
-		var fraction_z: float = clampf(position.z / field_width + 0.5, 0.0, 1.0)
+		# PROVISIONAL linear projection; RE 11 §2.4/§7 leaves world-to-radar mapping unknown.
+		var fraction_x: float = clampf(position.x / field_width + 0.5, 0.0, 1.0)
+		var total_length: float = field_length + 2.0 * in_goal_depth
+		var fraction_z: float = clampf(0.5 - position.z / total_length, 0.0, 1.0)
 		dot.position = Vector2(
 			fraction_x * area_size.x - DOT_SIZE.x * 0.5, fraction_z * area_size.y - DOT_SIZE.y * 0.5
 		)
