@@ -3,6 +3,12 @@ extends Node3D
 
 signal try_scored
 
+const PITCH_SCENE: PackedScene = preload("res://game/prototype/prototype_pitch.tscn")
+const PrototypePitchVisual = preload("res://game/prototype/prototype_pitch_visual.gd")
+const PLAYER_SCENE: PackedScene = preload("res://game/prototype/athlete_red.tscn")
+const OPPONENT_SCENE: PackedScene = preload("res://game/prototype/athlete_blue.tscn")
+const BALL_SCENE: PackedScene = preload("res://game/prototype/rugby_ball.tscn")
+
 @export var tuning: PrototypeTuning
 
 var _player: CharacterBody3D
@@ -38,10 +44,6 @@ func _physics_process(delta: float) -> void:
 
 
 func _build_world() -> void:
-	var line_material: StandardMaterial3D = _material(Color("f4f0d8"))
-	var player_material: StandardMaterial3D = _material(Color("e34b3f"))
-	var opponent_material: StandardMaterial3D = _material(Color("315fd0"))
-	var ball_material: StandardMaterial3D = _material(Color("f3d64e"))
 	var field_length: float = tuning.field_half_length * 2.0
 	var field_width: float = tuning.field_half_width * 2.0
 	var light: DirectionalLight3D = DirectionalLight3D.new()
@@ -58,47 +60,13 @@ func _build_world() -> void:
 	floor_shape.shape = floor_box
 	floor_shape.position.y = -0.15
 	floor_body.add_child(floor_shape)
-	_add_box(
-		"Pitch",
-		Vector3(0.0, -0.15, 0.0),
-		Vector3(field_length, 0.3, field_width),
-		_material(Color("318553"))
-	)
-	_add_box("Halfway", Vector3(0.0, 0.015, 0.0), Vector3(0.12, 0.03, field_width), line_material)
-	_add_box(
-		"NearTouchline",
-		Vector3(0.0, 0.015, -tuning.field_half_width + 0.2),
-		Vector3(field_length, 0.03, 0.12),
-		line_material
-	)
-	_add_box(
-		"FarTouchline",
-		Vector3(0.0, 0.015, tuning.field_half_width - 0.2),
-		Vector3(field_length, 0.03, 0.12),
-		line_material
-	)
-	_add_box(
-		"LeftTryLine",
-		Vector3(-tuning.try_line_x, 0.015, 0.0),
-		Vector3(0.12, 0.03, field_width),
-		line_material
-	)
-	_add_box(
-		"RightTryLine",
-		Vector3(tuning.try_line_x, 0.015, 0.0),
-		Vector3(0.12, 0.03, field_width),
-		line_material
-	)
+	var pitch: PrototypePitchVisual = PITCH_SCENE.instantiate() as PrototypePitchVisual
+	add_child(pitch)
+	pitch.configure(tuning.field_half_length, tuning.field_half_width, tuning.try_line_x)
 
-	_player = _make_actor("Player", player_material)
-	_opponent = _make_actor("Opponent", opponent_material)
-	_ball = MeshInstance3D.new()
-	_ball.name = "Ball"
-	var sphere: SphereMesh = SphereMesh.new()
-	sphere.radius = 0.32
-	sphere.height = 0.64
-	_ball.mesh = sphere
-	_ball.material_override = ball_material
+	_player = _make_actor("Player", PLAYER_SCENE)
+	_opponent = _make_actor("Opponent", OPPONENT_SCENE)
+	_ball = BALL_SCENE.instantiate() as MeshInstance3D
 	add_child(_ball)
 
 	_camera = Camera3D.new()
@@ -324,7 +292,7 @@ func _follow_camera() -> void:
 	_camera.look_at(_player.position + Vector3(0.0, 0.0, -4.0))
 
 
-func _make_actor(actor_name: String, actor_material: Material) -> CharacterBody3D:
+func _make_actor(actor_name: String, appearance: PackedScene) -> CharacterBody3D:
 	var actor: CharacterBody3D = CharacterBody3D.new()
 	actor.name = actor_name
 	add_child(actor)
@@ -335,36 +303,10 @@ func _make_actor(actor_name: String, actor_material: Material) -> CharacterBody3
 	collision.shape = capsule_shape
 	collision.position.y = 0.95
 	actor.add_child(collision)
-	var capsule_mesh: MeshInstance3D = MeshInstance3D.new()
-	var capsule: CapsuleMesh = CapsuleMesh.new()
-	capsule.radius = 0.55
-	capsule.height = 1.9
-	capsule_mesh.mesh = capsule
-	capsule_mesh.material_override = actor_material
-	capsule_mesh.position.y = 0.95
-	actor.add_child(capsule_mesh)
+	actor.add_child(appearance.instantiate())
 	return actor
 
 
 func _clamp_actor(actor: CharacterBody3D) -> void:
 	actor.position.x = clampf(actor.position.x, -tuning.field_half_length, tuning.field_half_length)
 	actor.position.z = clampf(actor.position.z, -tuning.field_half_width, tuning.field_half_width)
-
-
-func _add_box(
-	box_name: String, box_position: Vector3, box_size: Vector3, box_material: Material
-) -> void:
-	var mesh_instance: MeshInstance3D = MeshInstance3D.new()
-	mesh_instance.name = box_name
-	mesh_instance.position = box_position
-	var box_mesh: BoxMesh = BoxMesh.new()
-	box_mesh.size = box_size
-	mesh_instance.mesh = box_mesh
-	mesh_instance.material_override = box_material
-	add_child(mesh_instance)
-
-
-func _material(color: Color) -> StandardMaterial3D:
-	var result: StandardMaterial3D = StandardMaterial3D.new()
-	result.albedo_color = color
-	return result

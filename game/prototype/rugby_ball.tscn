@@ -1,0 +1,91 @@
+[gd_scene load_steps=9 format=3]
+
+[sub_resource type="StandardMaterial3D" id="Leather"]
+albedo_color = Color(0.93, 0.73, 0.21, 1)
+roughness = 0.7
+
+[sub_resource type="StandardMaterial3D" id="Seam"]
+albedo_color = Color(0.96, 0.95, 0.87, 1)
+roughness = 0.88
+
+[sub_resource type="StandardMaterial3D" id="Lace"]
+albedo_color = Color(0.31, 0.2, 0.1, 1)
+roughness = 0.88
+
+[sub_resource type="CylinderMesh" id="BallTip"]
+top_radius = 0.0
+bottom_radius = 0.19
+height = 0.28
+radial_segments = 12
+
+[sub_resource type="SphereMesh" id="BallShape"]
+radius = 0.34
+height = 0.68
+radial_segments = 12
+rings = 6
+
+[sub_resource type="TorusMesh" id="SeamRing"]
+inner_radius = 0.236
+outer_radius = 0.252
+rings = 8
+ring_segments = 16
+
+[sub_resource type="BoxMesh" id="LacingPatch"]
+size = Vector3(0.14, 0.025, 0.05)
+
+[sub_resource type="BoxMesh" id="LaceStitch"]
+size = Vector3(0.018, 0.024, 0.05)
+
+[node name="Ball" type="MeshInstance3D"]
+mesh = SubResource("BallShape")
+material_override = SubResource("Leather")
+scale = Vector3(1.0, 0.8, 0.8)
+
+[node name="LeftPoint" type="MeshInstance3D" parent="."]
+position = Vector3(-0.42, 0, 0)
+rotation = Vector3(0, 0, 1.5708)
+mesh = SubResource("BallTip")
+material_override = SubResource("Leather")
+
+[node name="RightPoint" type="MeshInstance3D" parent="."]
+position = Vector3(0.42, 0, 0)
+rotation = Vector3(0, 0, -1.5708)
+mesh = SubResource("BallTip")
+material_override = SubResource("Leather")
+
+[node name="CircumferentialSeamLeft" type="MeshInstance3D" parent="."]
+position = Vector3(-0.23, 0, 0)
+rotation = Vector3(0, 0, 1.5708)
+mesh = SubResource("SeamRing")
+material_override = SubResource("Seam")
+
+[node name="CircumferentialSeamRight" type="MeshInstance3D" parent="."]
+position = Vector3(0.23, 0, 0)
+rotation = Vector3(0, 0, -1.5708)
+mesh = SubResource("SeamRing")
+material_override = SubResource("Seam")
+
+[node name="LacingPatch" type="MeshInstance3D" parent="."]
+position = Vector3(0, 0.337, 0)
+mesh = SubResource("LacingPatch")
+material_override = SubResource("Seam")
+
+[node name="LaceStitch1" type="MeshInstance3D" parent="."]
+position = Vector3(-0.045, 0.346, 0)
+mesh = SubResource("LaceStitch")
+material_override = SubResource("Lace")
+
+[node name="LaceStitch2" type="MeshInstance3D" parent="."]
+position = Vector3(-0.015, 0.346, 0)
+mesh = SubResource("LaceStitch")
+material_override = SubResource("Lace")
+
+[node name="LaceStitch3" type="MeshInstance3D" parent="."]
+position = Vector3(0.015, 0.346, 0)
+mesh = SubResource("LaceStitch")
+material_override = SubResource("Lace")
+
+[node name="LaceStitch4" type="MeshInstance3D" parent="."]
+position = Vector3(0.045, 0.346, 0)
+mesh = SubResource("LaceStitch")
+material_override = SubResource("Lace")
