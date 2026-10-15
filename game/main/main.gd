@@ -2,9 +2,9 @@ class_name Main
 extends Node
 ## Entry scene of OpenRugby with a clearly labeled prototype sandbox route.
 
-const PROTOTYPE_SCENE_PATH: String = "res://game/prototype/prototype_sandbox.tscn"
-
 signal match_start_blocked(report: MatchReadinessReport)
+
+const PROTOTYPE_SCENE_PATH: String = "res://game/prototype/prototype_sandbox.tscn"
 
 var last_match_build: MatchBuildResult
 
