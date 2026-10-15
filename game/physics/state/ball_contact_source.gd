@@ -8,7 +8,12 @@ func detect_contacts(_position_m: Vector3, _orientation: Quaternion) -> Array[Ba
 	return []
 
 
-## True only when a stadium geometry owner has supplied stable deterministic data.
+## True when this source owns the y = 0 plane contacts for its configured geometry.
+func provides_ground_plane_contacts() -> bool:
+	return false
+
+
+## True when this source can supply the contact subset described by its identity and snapshot.
 func is_available() -> bool:
 	return false
 

@@ -626,18 +626,22 @@ func _detect_contacts() -> Array[BallContact]:
 	var body_y: Vector3 = state.orientation * Vector3.UP
 	var body_z: Vector3 = state.orientation * Vector3.BACK
 	var axes: Vector3 = params.semi_axes_m
-	var ground_radius: float = sqrt(
-		pow(body_x.y * axes.x, 2.0) + pow(body_y.y * axes.y, 2.0) + pow(body_z.y * axes.z, 2.0)
+	var source_owns_ground: bool = (
+		contact_source != null and contact_source.provides_ground_plane_contacts()
 	)
-	if state.position_m.y <= ground_radius:
-		var ground: BallContact = BallContact.new()
-		ground.body_id = 0
-		ground.feature_id = 0
-		ground.contact_kind = 0
-		ground.point_m = Vector3(state.position_m.x, 0.0, state.position_m.z)
-		ground.normal = up
-		ground.penetration_m = ground_radius - state.position_m.y
-		contacts += [ground]
+	if not source_owns_ground:
+		var ground_radius: float = sqrt(
+			pow(body_x.y * axes.x, 2.0) + pow(body_y.y * axes.y, 2.0) + pow(body_z.y * axes.z, 2.0)
+		)
+		if state.position_m.y <= ground_radius:
+			var ground: BallContact = BallContact.new()
+			ground.body_id = 0
+			ground.feature_id = 0
+			ground.contact_kind = 0
+			ground.point_m = Vector3(state.position_m.x, 0.0, state.position_m.z)
+			ground.normal = up
+			ground.penetration_m = ground_radius - state.position_m.y
+			contacts += [ground]
 	if contact_source != null:
 		contacts.append_array(contact_source.detect_contacts(state.position_m, state.orientation))
 	contacts.append_array(pending_contacts)
