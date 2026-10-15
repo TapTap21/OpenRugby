@@ -18,8 +18,23 @@ ellipsoid's downward support point projected onto the ground plane.
 - This is not a complete stadium collision provider. It has no editable
   stadium triangle data and supplies no face, edge, vertex, post, or board
   contacts. Do not wire it as complete Classic stadium geometry.
+- `is_available()` means this provider can supply its configured ground-plane
+  subset. It does not attest that stadium mesh geometry is present or that
+  complete Classic match collision coverage is available.
 - Ground plane contact identity currently uses the `BallContact` ground kind
   and stable zero body/feature/subfeature/ordinal fields.
+
+## Integration contract
+
+`BallPhysicsSystem._detect_contacts()` currently emits a hard-coded ground
+contact before appending contacts from its injected `BallContactSource`. Wiring
+`GroundPlaneContactSource` unchanged would therefore emit two ground rows for
+the same overlap. Before integration, either remove/disable the built-in ground
+fallback when this provider supplies ground contacts, or suppress the provider
+ground row when the fallback is active. Do not combine both rows unchanged.
+This duplicate-row issue is separate from the missing stadium mesh coverage:
+even after ground contact is composed once, editable stadium triangle contacts
+are still required for complete Classic collision geometry.
 
 ## Verification
 
@@ -35,6 +50,7 @@ ellipsoid's downward support point projected onto the ground plane.
 
 ## Next steps
 
-Request independent code and fidelity review. Keep the provider uncomposed
-until an editable stadium collision mesh provider exists and the composition
-can guarantee full geometry coverage.
+Keep the provider uncomposed until integration handles the duplicate ground
+row and an editable stadium collision mesh provider exists. The composition
+must guarantee full geometry coverage before it can claim complete Classic
+stadium collision support.
