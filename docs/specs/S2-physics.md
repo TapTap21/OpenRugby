@@ -231,6 +231,43 @@ floating accumulation and platform-dependent threshold comparisons:
   recover its activation conditions. Do not activate this in Classic. Leave an explicit typed,
   deterministic extension point only if needed; do not invent a trigger or alter Classic cadence.
 
+### Contact LCP response contract
+
+RE 06 §2.4 observes a Dantzig/Baraff-style LCP with normal, friction, and rolling/twist rows per
+contact. The recovered call path is partial: 0x4ba850 zeros an N×N matrix and constructs/scales
+six-component row data and symmetric pair products; 0x4b6920 owns pivot/state processing and emits
+oscillation/abort warnings; 0x4bacf0 applies the solved rows. Evidence also covers helpers 0x4baa80
+and 0x4babd0. See evidence IDs in the S2 contact resume note. The following response semantics are
+recovered:
+
+- For contact long-axis component `c`, compute `k = clamp(f1 + (1 - c*c) * (f0 - f1), 1, 2)`.
+  Interpreting `k` as `1 + e` (so `e = k - 1`) is an inference; it does not establish the normal
+  RHS or restitution target. The `±f2/2` term is compiled out and does not perturb `k`; this
+  formula does not establish any random-stream behavior.
+- Tangential impulse obeys the Coulomb cone `abs(lambda_t) <= f3 * lambda_n`.
+- Contact geometry is sorted by the stable contact key specified in §3 and §5. Those sections do
+  not establish LCP row order. RE shows pivot/state processing and abort behavior, but the available
+  evidence does not establish the exact Jacobians/RHS, pivot choices/tie-breaks, outer tolerance,
+  iteration cap, oscillation detector details, or a numeric reference case. An oscillating solve
+  aborts the constraint and then the solver.
+- Deterministic solve results are a rebuild requirement; current evidence does not establish that
+  the Classic solver is deterministic across repeated runs or platforms.
+- The rolling/twist bound `abs(lambda_r) <= 10*f4` is observed, but the exact row/torque form is
+  unresolved, including the associated angular response. It cannot be approximated by
+  angular-velocity damping and still be called the recovered Classic solver.
+
+Therefore `BallContactSolver` stays unavailable until a complete injected implementation can
+provide the recovered response plus an explicitly documented policy for unresolved mechanics. Do
+not present guessed Jacobians/RHS, pivot policy, iteration limits, tolerances, or rolling torque as
+recovered facts. A failed solve must remain transactional and leave the ball and future-affecting
+solver state unchanged, as required by the `BallContactSolver` API.
+
+Acceptance coverage currently locks the exact surface-to-restitution formula, side-on/end-on
+endpoints, interpolation, and that changing the stored `f2` parameter does not alter this formula.
+This does not test random-stream consumption. Friction-cone, LCP row-order, oscillation-abort,
+rollback, and repeatability tests belong with the first complete solver; they must exercise that
+implementation rather than a test-only imitation.
+
 ## 5. Mod data and hooks
 
 All observed numeric fields above are data overrides with base Classic values. Unresolved fields
