@@ -1,9 +1,12 @@
 class_name BallPathPredictor
 extends RefCounted
 ## Stateless analytic path stepper kept separate from the rigid-body contact solver.
+## Uses configured gravity only; the optional controller force is omitted until its caller supplies
+## an explicit force policy.
 
 
-## Advances one bounded interval and applies the observed predictor bounce/roll response.
+## Advances one bounded interval using the observed predictor bounce/roll response.
+## A non-finite ground-contact time stops prediction without advancing that segment.
 static func advance(
 	input_state: BallPredictionState, dt: float, params: BallPhysicsParams
 ) -> BallPredictionState:

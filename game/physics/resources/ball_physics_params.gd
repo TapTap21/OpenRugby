@@ -26,11 +26,16 @@ extends Resource
 @export var drag_coefficient_low: float = 0.5
 @export var drag_coefficient_high: float = 0.2
 @export var initial_spin_jitter_rad_s: float = 0.05
+## RE 06 §2.5 observed analytic predictor centre rest height, metres.
 @export var predictor_rest_height_m: float = 0.1
+## RE 06 §2.5 observed later-segment rolling threshold, seconds.
 @export var predictor_roll_hop_time_s: float = 0.01
 @export var drag_reference_speed_threshold_m_s: float = 0.01
+## RE 06 §2.5 rolling deceleration rate, per second.
 @export var predictor_roll_acceleration: float = 0.8
+## RE 06 §2.5 observed vertical velocity multiplier after a bounce.
 @export var predictor_roll_restitution: float = 0.55
+## RE 06 §2.5 observed horizontal velocity multiplier after a bounce.
 @export var predictor_roll_horizontal_retention: float = 0.885
 
 
