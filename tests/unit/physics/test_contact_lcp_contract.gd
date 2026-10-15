@@ -27,7 +27,7 @@ func test_b07_condition_two_restitution_endpoints_and_interpolation() -> void:
 	var r5: GdUnitBoolAssert = assert_bool(is_equal_approx(condition_two.friction, 0.7)).is_true()
 
 
-func test_compiled_out_bounce_randomness_does_not_change_restitution() -> void:
+func test_stored_f2_value_does_not_change_restitution_formula() -> void:
 	var surface: PitchSurfaceParams = PitchSurfaceParams.new()
 	var original_restitution: float = surface.restitution(0.4)
 	surface.unused_bounce_randomness = 0.0
