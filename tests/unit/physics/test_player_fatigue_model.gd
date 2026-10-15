@@ -103,19 +103,27 @@ func test_f03_accrual_is_on_pitch_only_and_delta_is_injected() -> void:
 		assert_bool(_add(model, &"home", &"bench", 16, 75, 20.0, false)).is_true()
 	)
 	@warning_ignore("unused_variable")
-	var r3: GdUnitBoolAssert = assert_bool(model.advance_frame(0.25)).is_true()
+	var r3: GdUnitBoolAssert = (
+		assert_bool(_add(model, &"home", &"extra", 17, 75, 30.0, true)).is_true()
+	)
 	@warning_ignore("unused_variable")
-	var r4: GdUnitFloatAssert = (
+	var r4: GdUnitBoolAssert = assert_bool(model.advance_frame(0.25)).is_true()
+	@warning_ignore("unused_variable")
+	var r5: GdUnitFloatAssert = (
 		assert_float(model.fatigue_snapshot(&"home", 1).fatigue_time_s).is_equal(10.25)
 	)
 	@warning_ignore("unused_variable")
-	var r5: GdUnitFloatAssert = (
+	var r6: GdUnitFloatAssert = (
 		assert_float(model.fatigue_snapshot(&"home", 16).fatigue_time_s).is_equal(20.0)
 	)
 	@warning_ignore("unused_variable")
-	var r6: GdUnitBoolAssert = assert_bool(model.advance_frame(-0.1)).is_false()
+	var r7: GdUnitFloatAssert = (
+		assert_float(model.fatigue_snapshot(&"home", 17).fatigue_time_s).is_equal(30.0)
+	)
 	@warning_ignore("unused_variable")
-	var r7: GdUnitBoolAssert = assert_bool(model.advance_frame(NAN)).is_false()
+	var r8: GdUnitBoolAssert = assert_bool(model.advance_frame(-0.1)).is_false()
+	@warning_ignore("unused_variable")
+	var r9: GdUnitBoolAssert = assert_bool(model.advance_frame(NAN)).is_false()
 
 
 ## Halftime recovery is 300 match-seconds for registered matchday shirts, floored at zero.

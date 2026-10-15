@@ -3,6 +3,7 @@ extends RefCounted
 ## Owns deterministic per-player match fatigue and produces S2 fatigue snapshots.
 
 const SNAPSHOT_VERSION: int = 1
+const ON_PITCH_SHIRT_MAX: int = 15
 
 var params: PlayerFatigueParams
 
@@ -70,7 +71,7 @@ func advance_frame(dt_match: float) -> bool:
 	if not is_finite(dt_match) or dt_match < 0.0:
 		return false
 	for entry: PlayerFatigueEntry in _ordered_entries():
-		if entry.on_pitch:
+		if entry.on_pitch and entry.shirt_number <= ON_PITCH_SHIRT_MAX:
 			entry.fatigue_time_s += dt_match
 	return true
 

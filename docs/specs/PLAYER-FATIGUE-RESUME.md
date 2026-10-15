@@ -15,10 +15,12 @@ fatigue_penalty)` rule; Tackling preserves RE09's raw subtraction, which can rea
 team then shirt; callers can checkpoint with `snapshot()` and restore atomically.
 
 The model accepts only shirt numbers 1..22, matching the observed matchday squad.
-It does not infer a 30-player roster, substitutions, or the owner that changes
-pitch presence. Halftime recovery updates all registered shirts, whether on-pitch
-or not. MatchRunner has no existing fatigue-owner lifecycle or match-clock delta
-injection seam, so this component is not silently wired into live composition.
+Only shirts 1..15 accrue per-frame fatigue under RE09 §2.3, even if a caller marks
+shirt 16..22 as on-pitch; those entries remain available for queries and halftime
+recovery. The slice does not infer substitutions, bench policy, or the owner that
+changes pitch presence. Halftime recovery updates all registered shirts, whether
+on-pitch or not. MatchRunner has no existing fatigue-owner lifecycle or match-clock
+delta injection seam, so this component is not silently wired into live composition.
 
 Acceptance coverage: observed curve endpoints and midpoint, integer percent / skill
 penalty truncation, deterministic entry ordering, on-pitch accrual with injected
