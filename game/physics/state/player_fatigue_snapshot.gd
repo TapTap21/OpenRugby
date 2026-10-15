@@ -31,7 +31,7 @@ func is_valid() -> bool:
 		and energy_percent <= 100
 		and effective_passing >= 0
 		and effective_passing <= 100
-		and effective_tackling >= 0
+		and effective_tackling >= -45
 		and effective_tackling <= 100
 	)
 
