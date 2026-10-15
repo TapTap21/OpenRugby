@@ -8,6 +8,11 @@ loop and the time-up report whitelist. See `S3-rules-bridge.md`.
 
 - Authored only the proposed S3 contract; no production code, REA calls, Godot
   behavior was added. No REA call was made.
+- Independent read-only RE05 review by `/root/fatigue_system` passed after
+  correcting the public identity types and documenting missed-conversion
+  kickoff as an inference.
+- Commit `7fbbb25` (`docs(rules): specify scoring and period end bridge`) is
+  pushed to `origin/docs/s3-rules-bridge`.
 - Primary evidence is already documented in `docs/re/05-rules.md` §§2.1–2.3,
   2.8, 6, and 7. No new binary-derived claim was introduced.
 - Independent read-only review by `/root/fatigue_system` found two contract
@@ -37,22 +42,24 @@ loop and the time-up report whitelist. See `S3-rules-bridge.md`.
 
 ## Before implementation
 
-1. Obtain independent contract and fidelity review of the new spec.
-2. Resolve the S1 typed staged-event adapter and tick owner ordering.
-3. Add an S2 committed grounding fact and a completed kick-result contract, or
+1. Resolve the S1 typed staged-event adapter and tick owner ordering.
+2. Add an S2 committed grounding fact and a completed kick-result contract, or
    mark S3 Classic scoring unavailable.
-4. Define S4's typed conversion-attempt and completed-result adapter, including
+3. Define S4's typed conversion-attempt and completed-result adapter, including
    the restart setup owner.
-5. Resolve the extra second-half period-end gate from RE evidence before
+4. Resolve the extra second-half period-end gate from RE evidence before
    enabling that transition. Keep cut-scene pause behavior and advantage
    unknowns configurable/explicit.
-6. Have an independent test author derive tests from acceptance cases §5 before
+5. Have an independent test author derive tests from acceptance cases §5 before
    implementation. The code author must not approve the same slice.
 
 ## Verification and git
 
-The slice only changes Markdown. Run `git diff --check` on the docs and hygiene
-before commit. No Godot gate is needed because no Godot command is used. Use a
-conventional `docs:` commit with decision trailers and `Model: gpt-6-luna`, then
-push `docs/s3-rules-bridge`. Do not stage or clean the pre-existing LFS PNG
-status.
+The slice changes Markdown only. `scripts/hygiene.sh`, `gdlint game tests`,
+`gdformat --check --line-length 100 game tests`, and the safety-gated test run
+with `XDG_DATA_HOME=/tmp/openrugby-s3-spec-user` passed; the suite reports
+164/164. Whole-repository `gdformat --check` only fails in vendored gdUnit4 as
+recorded above. The two-file commit is pushed. Do not stage or clean the
+pre-existing LFS PNG status. Root `.omc/HANDOFF.md` remains for the parent
+orchestrator to update because this slice was explicitly confined to its
+isolated worktree.
