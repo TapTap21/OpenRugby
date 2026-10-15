@@ -315,7 +315,11 @@ func test_c44_data_fields_are_exported() -> void:
 					"line_5_from_touch",
 					"goal_post_gap",
 					"crossbar_height",
-					"goal_post_height",
+					"goal_post_radius",
+					"goal_post_bottom",
+					"goal_post_top",
+					"goal_pad_size",
+					"goal_pad_height",
 				]
 			),
 		],
