@@ -33,7 +33,7 @@ properties; they must not infer a different constructor from implementation code
 | `MatchReadinessReport` | `game/match/match_readiness_report.gd` | `blockers: Array[MatchReadinessBlocker]`; also `is_ready() -> bool` |
 | `MatchBuildResult` | `game/match/match_build_result.gd` | `ok: bool`, `sim: MatchSim | null`, `codec: S2ReplayCodec | null`, `setup_fingerprint: String`, `readiness: MatchReadinessReport`, `error: Error` |
 | `PreparedAppendToken` | `game/match/prepared_append_token.gd` | Opaque token; public no-argument constructor, no inspectable fields |
-| `AppendPrepareResult` | `game/match/append_prepare_result.gd` | `ok: bool`, `token: PreparedAppendToken | null`, `error: Error`; `_init(p_ok: bool, p_token: PreparedAppendToken, p_error: Error)` |
+| `AppendPrepareResult` | `game/match/append_prepare_result.gd` | `ok: bool`, `token: PreparedAppendToken | null`, `error: Error`; `static prepared(token: PreparedAppendToken) -> AppendPrepareResult`; `static failed(error: Error) -> AppendPrepareResult` |
 | `ReplaySourceRowResult` | `game/match/replay_source_row_result.gd` | `ok: bool`, `row: ReplaySourceRow | null`, `error: Error` |
 | `ReplayValidationToken` | `game/match/replay_validation_token.gd` | Opaque token; public no-argument constructor, no inspectable fields |
 
@@ -204,6 +204,13 @@ breaking opacity. Cross-log, cross-index, cross-tick, cross-sim, stale, cancelle
 and row/readback/output-identity substitution checks remain required. `MatchCompositionRequest` above is fully specified and remains a build input record, not
 a handle for tests to mutate the sim.
 
+`AppendPrepareResult` at `game/match/append_prepare_result.gd` is immutable after construction.
+Its exact factories are `static prepared(token: PreparedAppendToken) -> AppendPrepareResult` and
+`static failed(error: Error) -> AppendPrepareResult`. `prepared` returns `(true, exact_token, OK)`
+for a non-null token and `(false, null, ERR_INVALID_PARAMETER)` for null. `failed` returns
+`(false, null, non_OK_error)` and normalizes `OK` to `ERR_INVALID_PARAMETER`. Public fields
+`ok: bool`, `token: PreparedAppendToken | null`, and `error: Error` are read-only.
+
 `ReplaySourceRow.new()` is the approved way for a fake to create a caller-constructed row for the
 C-75 rejection case. It creates an inert object whose `frame` accessor is null and whose command
 and output accessors return empty detached arrays; it carries no log-issued identity. Tests must
@@ -230,3 +237,11 @@ The S2-owned contract must separately specify concrete typed `S2RuntimePort` and
 validation and fallible preparation results; `S2ProviderBindings` fields; and
 `S2ReplayInstanceResult`. S1 does not add a generic port protocol, generic command/output schema,
 or public checkpoint-payload fields to make a fake convenient.
+
+The cross-slice bridge remains deferred and disabled pending independent S1/S2 review: the
+`ReplayRowTransaction` and `ReplayCandidate` lifecycle, candidate-seal result and abort before
+`PreparedTick`; the single canonical readback passed to the S2 owner; typed production append;
+and S2 codec/port ownership. No caller-mintable authority or guessed callback signature may stand
+in for those contracts. MatchRunner and every replay entry point stay fail-closed until the shared
+contracts and implementation are approved. The positive production commit-publication test is
+deferred with typed append; fixture rows do not exercise or represent that boundary.

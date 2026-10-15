@@ -250,9 +250,7 @@ func tick(frame: InputFrame) -> TickResult:
 
 
 ## Finalizes a runner-authorized prepared tick. The token is validated by the runner boundary.
-func finalize_prepared_tick(
-	prepared_tick: PreparedTick, append_token: PreparedAppendToken
-) -> Error:
+func finalize_prepared_tick(prepared_tick: PreparedTick, append_token: PreparedAppendToken) -> void:
 	if (
 		_runner_owned
 		and _is_active_handle(prepared_tick)
@@ -265,8 +263,7 @@ func finalize_prepared_tick(
 		_live_append_token = append_token
 		_append_registration.clear()
 		_consume_prepared_tick(prepared_tick)
-		return OK
-	return ERR_INVALID_PARAMETER
+	return
 
 
 ## Finalizes exactly this sim's active standalone tick once.

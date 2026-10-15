@@ -399,19 +399,93 @@ static func _exact_value_equal(left: Variant, right: Variant) -> bool:
 		return false
 	if left is float:
 		return (is_nan(left) and is_nan(right)) or left == right
+	if left is Vector2 or left is Vector2i:
+		return _exact_value_equal(left.x, right.x) and _exact_value_equal(left.y, right.y)
+	if left is Vector3 or left is Vector3i:
+		return (
+			_exact_value_equal(left.x, right.x)
+			and _exact_value_equal(left.y, right.y)
+			and _exact_value_equal(left.z, right.z)
+		)
+	if left is Vector4 or left is Vector4i:
+		return (
+			_exact_value_equal(left.x, right.x)
+			and _exact_value_equal(left.y, right.y)
+			and _exact_value_equal(left.z, right.z)
+			and _exact_value_equal(left.w, right.w)
+		)
+	if left is Rect2 or left is Rect2i:
+		return (
+			_exact_value_equal(left.position, right.position)
+			and _exact_value_equal(left.size, right.size)
+		)
+	if left is Transform2D:
+		return (
+			_exact_value_equal(left.x, right.x)
+			and _exact_value_equal(left.y, right.y)
+			and _exact_value_equal(left.origin, right.origin)
+		)
+	if left is Plane:
+		return _exact_value_equal(left.normal, right.normal) and _exact_value_equal(left.d, right.d)
+	if left is Quaternion:
+		return (
+			_exact_value_equal(left.x, right.x)
+			and _exact_value_equal(left.y, right.y)
+			and _exact_value_equal(left.z, right.z)
+			and _exact_value_equal(left.w, right.w)
+		)
+	if left is AABB:
+		return (
+			_exact_value_equal(left.position, right.position)
+			and _exact_value_equal(left.size, right.size)
+		)
+	if left is Basis:
+		return (
+			_exact_value_equal(left.x, right.x)
+			and _exact_value_equal(left.y, right.y)
+			and _exact_value_equal(left.z, right.z)
+		)
+	if left is Transform3D:
+		return (
+			_exact_value_equal(left.basis, right.basis)
+			and _exact_value_equal(left.origin, right.origin)
+		)
+	if left is Projection:
+		return (
+			_exact_value_equal(left.x, right.x)
+			and _exact_value_equal(left.y, right.y)
+			and _exact_value_equal(left.z, right.z)
+			and _exact_value_equal(left.w, right.w)
+		)
+	if left is Color:
+		return (
+			_exact_value_equal(left.r, right.r)
+			and _exact_value_equal(left.g, right.g)
+			and _exact_value_equal(left.b, right.b)
+			and _exact_value_equal(left.a, right.a)
+		)
 	if left is Dictionary:
 		if left.size() != right.size():
 			return false
-		for key: Variant in left:
-			var matched_key: Variant = null
-			var found_key: bool = false
-			for right_key: Variant in right:
-				if _exact_value_equal(key, right_key):
-					matched_key = right_key
-					found_key = true
+		var left_keys: Array = left.keys()
+		var left_values: Array = left.values()
+		var right_keys: Array = right.keys()
+		var right_values: Array = right.values()
+		var matched: PackedByteArray = PackedByteArray()
+		matched.resize(right_keys.size())
+		for entry_index: int in range(left_keys.size()):
+			var key: Variant = left_keys[entry_index]
+			var paired_index: int = -1
+			for index: int in range(right_keys.size()):
+				if matched[index] == 0 and _exact_value_equal(key, right_keys[index]):
+					paired_index = index
 					break
-			if not found_key or not _exact_value_equal(left[key], right[matched_key]):
+			if (
+				paired_index < 0
+				or not _exact_value_equal(left_values[entry_index], right_values[paired_index])
+			):
 				return false
+			matched[paired_index] = 1
 		return true
 	if left is Array:
 		if left.size() != right.size():
@@ -434,7 +508,74 @@ static func _exact_value_equal(left: Variant, right: Variant) -> bool:
 			if not _exact_value_equal(left[index], right[index]):
 				return false
 		return true
+	if left is PackedVector2Array or left is PackedVector3Array:
+		if left.size() != right.size():
+			return false
+		for index: int in range(left.size()):
+			if not _exact_value_equal(left[index], right[index]):
+				return false
+		return true
+	if left is PackedVector4Array or left is PackedColorArray:
+		if left.size() != right.size():
+			return false
+		for index: int in range(left.size()):
+			if not _exact_value_equal(left[index], right[index]):
+				return false
+		return true
 	return left == right
+
+
+static func _contains_nan(value: Variant) -> bool:
+	if value is float:
+		return is_nan(value)
+	if value is Vector2:
+		return is_nan(value.x) or is_nan(value.y)
+	if value is Vector3:
+		return is_nan(value.x) or is_nan(value.y) or is_nan(value.z)
+	if value is Vector4 or value is Quaternion:
+		return is_nan(value.x) or is_nan(value.y) or is_nan(value.z) or is_nan(value.w)
+	if value is Rect2:
+		return _contains_nan(value.position) or _contains_nan(value.size)
+	if value is Transform2D:
+		return _contains_nan(value.x) or _contains_nan(value.y) or _contains_nan(value.origin)
+	if value is Plane:
+		return _contains_nan(value.normal) or is_nan(value.d)
+	if value is AABB:
+		return _contains_nan(value.position) or _contains_nan(value.size)
+	if value is Basis:
+		return _contains_nan(value.x) or _contains_nan(value.y) or _contains_nan(value.z)
+	if value is Transform3D:
+		return _contains_nan(value.basis) or _contains_nan(value.origin)
+	if value is Projection:
+		return (
+			_contains_nan(value.x)
+			or _contains_nan(value.y)
+			or _contains_nan(value.z)
+			or _contains_nan(value.w)
+		)
+	if value is Color:
+		return is_nan(value.r) or is_nan(value.g) or is_nan(value.b) or is_nan(value.a)
+	if value is PackedFloat32Array or value is PackedFloat64Array:
+		for item: float in value:
+			if is_nan(item):
+				return true
+	if value is PackedVector2Array or value is PackedVector3Array:
+		for item: Variant in value:
+			if _contains_nan(item):
+				return true
+	if value is PackedVector4Array or value is PackedColorArray:
+		for item: Variant in value:
+			if _contains_nan(item):
+				return true
+	if value is Array:
+		for item: Variant in value:
+			if _contains_nan(item):
+				return true
+	if value is Dictionary:
+		for key: Variant in value:
+			if _contains_nan(key) or _contains_nan(value[key]):
+				return true
+	return false
 
 
 func _copy_row(row: Dictionary) -> Dictionary:
@@ -466,7 +607,11 @@ static func _supports_row_value(value: Variant) -> bool:
 		return false
 	if value is Dictionary:
 		for key: Variant in value:
-			if not _supports_row_value(key) or not _supports_row_value(value[key]):
+			if (
+				not _supports_row_value(key)
+				or _contains_nan(key)
+				or not _supports_row_value(value[key])
+			):
 				return false
 	elif value is Array:
 		for item: Variant in value:
